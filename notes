@@ -1,0 +1,17 @@
+INSTALL:
+  1) GPM
+  2) MS-GFDB
+  3) Open-MS
+  3) Postgresql (version 9.1 or newer)
+  4) plperl
+
+
+Make sure that tandem.exe (from GPM) and the openms utility programs
+(such as MapAlignerPoseClustering) are in directories (folders) included in
+your PATH environment variable.
+
+git clone http://github.com/wfmartin/martin_mslib.git
+
+Copy MSGFDB.jar into the RUN directory.
+
+Set-up PERLLIB environment variable to include PLIB.
