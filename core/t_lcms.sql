@@ -44,6 +44,7 @@ CREATE TABLE lcms_library_compound(
   lcms_library_id            varchar,
   compound_w_origin_ids      integer[],  -- isomeric compounds
                                          -- NULL for excluded compounds
+  source_consensus_cpd_id    integer,
 
   rt_start                   real,
   rt_end                     real,
@@ -62,3 +63,6 @@ CREATE TABLE lcms_library_compound(
 );
 
 
+CREATE TABLE lcms_lib_cpd_source(
+  lcms_library_compound_id   integer,
+  consensus_id               

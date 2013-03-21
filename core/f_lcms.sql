@@ -160,11 +160,12 @@ BEGIN
   fdr := get_cpds_from_consensus(p_consensus_id, p_max_fdr);
 
   INSERT INTO lcms_library_compound(lcms_library_id, compound_w_origin_ids,
-      rt_start, rt_end, min_z, max_z, mass, mass_rt_rectangle)
+      source_consensus_cpd_id, rt_start, rt_end, min_z, max_z, mass,
+      mass_rt_rectangle)
     SELECT
       p_lcms_library_id,
       array_agg(compound_w_origin_id) AS compound_w_origin_ids,
-      rt_start, rt_end, min_z, max_z, mass,
+      consensus_compound_id, rt_start, rt_end, min_z, max_z, mass,
       (array_agg(mass_rt_rectangle))[1]
     FROM tmp_cpd
     GROUP BY consensus_compound_id, rt_start, rt_end, min_z, max_z, mass;
