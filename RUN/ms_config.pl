@@ -60,6 +60,9 @@ my @opts_specs = (
   # Quality threshold for consensus groups output
   'min_featurelinker_quality=f',
 
+  # 
+  'min_featurelinker_num_items=i',
+
   # Quantity threshold for consensus grps output from FeatureLinkerUnlabeledQT.
   'min_quantity=i',
 

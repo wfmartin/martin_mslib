@@ -15,3 +15,7 @@ git clone http://github.com/wfmartin/martin_mslib.git
 Copy MSGFDB.jar into the RUN directory.
 
 Set-up PERLLIB environment variable to include PLIB.
+
+Install required perl packages:
+   sudo cpan install `cat perl_packages`      (on unix)
+

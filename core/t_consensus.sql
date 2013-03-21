@@ -12,6 +12,7 @@ CREATE TABLE consensus_parameters(
   mass_ppm_error_limit       real,
   cons_max_rt_diff           real,
   min_featurelinker_quality  real,
+  min_featurelinker_num_items integer,
   min_quantity               real,
 
   -- Times to attempt fragmenting compound before putting in exclusion list
