@@ -19,8 +19,6 @@ CREATE LANGUAGE plperlu;
 
 \i agilent/t_molf.sql
 \i agilent/f_molf.sql
-\i agilent/f_msdirect.sql
-\i agilent/f_mod_mgf.sql
 
 \i gpm/t_gpm.sql
 \i gpm/f_gpm_init.sql

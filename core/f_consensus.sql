@@ -996,13 +996,14 @@ CREATE OR REPLACE FUNCTION ms_inclusions_report(
     WHERE consensus_id = $1
     )
   SELECT 
-      (mass/z + t.charge_carrier_mass)::real AS mz,
-      z AS charge,
+      (mass/dominant_z + t.charge_carrier_mass)::real AS mz,
+      dominant_z AS charge,
       rt,
       (rt_end - rt_start)/2::real  AS delta_rt
-  FROM consensus_compound CROSS JOIN generate_series(1, 9) AS z,  t
-  WHERE consensus_id = $1  AND (NOT exclude_compound) AND
-        z BETWEEN min_z and max_z;
+  FROM consensus_compound, t
+  WHERE consensus_id = $1  AND (NOT exclude_compound) AND 
+        (NOT msms_only)
+  ORDER BY quantity DESC;
 $$;
 
 

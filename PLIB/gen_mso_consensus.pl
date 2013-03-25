@@ -299,7 +299,7 @@ CREATE
         mass, rt, rt_width_at_half_ht, rt_start, rt_end,
         quantity, rel_quantity, mass_rt_rectangle, obs_mass_list,
         quality, dataset_list, msms_only, 
-        min_z, max_z)
+        min_z, max_z, dominant_z)
       WITH tmp_merged AS (SELECT * FROM generate_merged_peaks(NULL))
       SELECT
         ? AS consensus_id,
@@ -321,7 +321,8 @@ CREATE
 
          False,  
          min_z,
-         max_z
+         max_z,
+         dominant_z
 
       FROM tmp_merged
 INSERT_COMPOUND
@@ -356,7 +357,8 @@ INSERT_COMPOUND
                 rt_adjustment_to_consensus, ?, ?)
             AS mass_rt_rectangle,
         min_z,
-        max_z
+        max_z,
+        dominant_z
       FROM pass_1 JOIN observed_mass USING(id)
 TMP_ORPHANS
   $sth = $dbh->prepare($query);
@@ -417,7 +419,7 @@ LCMS_ORPHAN
       INSERT INTO consensus_compound(consensus_id,
           mass, rt, rt_width_at_half_ht, rt_start, rt_end,
           quantity, rel_quantity, mass_rt_rectangle, obs_mass_list,
-          dataset_list, msms_only, min_z, max_z)
+          dataset_list, msms_only, min_z, max_z, dominant_z)
         SELECT
           ? AS consensus_id,
           mass, rt, rt_width_at_half_ht, rt_start, rt_end,
@@ -428,7 +430,8 @@ LCMS_ORPHAN
           ARRAY[dataset] AS dataset_list,
           False,  
           min_z,
-          max_z
+          max_z,
+          dominant_z
         FROM tmp_orphan_to_promote p
         JOIN observed_mass o ON (o.id = p.obs_mass_id)
 PROMOTE
@@ -473,9 +476,9 @@ UPDATE_LCMS
 
   $query = <<ORPHANS;
     INSERT INTO obs_mass_no_cons(obs_mass_id, consensus_id, mass,
-            rt_start, rt_end, mass_rt_rectangle, min_z, max_z)
+        rt_start, rt_end, mass_rt_rectangle, min_z, max_z, dominant_z)
       SELECT obs_mass_id, ?, mass,
-            rt_start, rt_end, mass_rt_rectangle, min_z, max_z
+            rt_start, rt_end, mass_rt_rectangle, min_z, max_z, dominant_z
       FROM tmp_orphan;
 ORPHANS
   $sth = $dbh->prepare($query);

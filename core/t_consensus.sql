@@ -126,6 +126,7 @@ CREATE TABLE consensus_compound (
 
   min_z                      integer,
   max_z                      integer,
+  dominant_z                 integer,
 
   ----------------------------------------------------------------------
   -- For optimization, these status values are kept here.
@@ -304,7 +305,8 @@ CREATE TABLE obs_mass_no_cons(
   rt_end                     real,
   mass_rt_rectangle          box,
   min_z                      integer,
-  max_z                      integer
+  max_z                      integer,
+  dominant_z                 integer
 );
 
 CREATE INDEX obs_mass_no_cons_by_mass ON obs_mass_no_cons(mass);

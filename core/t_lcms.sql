@@ -61,8 +61,3 @@ CREATE TABLE lcms_library_compound(
   ---------------------------------------------------------------------------
   mass_rt_rectangle          box
 );
-
-
-CREATE TABLE lcms_lib_cpd_source(
-  lcms_library_compound_id   integer,
-  consensus_id               

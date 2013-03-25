@@ -112,7 +112,8 @@ CREATE OR REPLACE FUNCTION parse_molf_cef(
       component_rt           real,
       component_charge       integer,
       component_num_neutrons integer,
-      component_recipe       varchar
+      component_recipe       varchar,
+      component_volume       real
     )
     LANGUAGE plpgsql AS $$
 DECLARE
@@ -156,6 +157,7 @@ BEGIN
       component_rt     := ( XPATH('@rt', v_peak ) )[1];
       component_recipe := ( XPATH('@s',  v_peak ) )[1];
       component_charge := ( XPATH('@z',  v_peak ) )[1];
+      component_volume := ( XPATH('@v',  v_peak ) )[1];
 
       component_num_neutrons := COALESCE(
         (WITH pass_1(match) AS
@@ -252,6 +254,7 @@ CREATE OR REPLACE FUNCTION combine_molf_data(
       csv_mass               double precision,
       component_charge       integer,
       component_recipe       varchar,
+      component_volume       real,
       min_z                  integer,
       max_z                  integer,
       mz                     double precision,
@@ -281,6 +284,7 @@ BEGIN
       COALESCE(m.component_charge, tmp_mgf.charge) 
           AS component_charge,
       m.component_recipe,
+      m.component_volume,
       m.min_z,
       m.max_z,
       COALESCE(m.component_mz, tmp_mgf.pepmass) AS mz,
@@ -310,6 +314,7 @@ BEGIN
     p.csv_mass,
     p.component_charge,
     p.component_recipe,
+    p.component_volume,
     p.min_z,
     p.max_z,
     p.mz,
@@ -382,6 +387,7 @@ BEGIN
       csv_mass,
       component_charge,
       component_recipe,
+      component_volume,
       component_mz,
       min_z,
       max_z,
@@ -457,6 +463,7 @@ BEGIN
         csv_mass,
         component_charge,
         component_recipe,
+        component_volume,
         min_z,
         max_z,
         mz,
@@ -483,6 +490,7 @@ BEGIN
         csv_mass,
         component_charge,
         component_recipe,
+        component_volume,
         min_z,
         max_z,
         mz,
@@ -613,7 +621,7 @@ BEGIN
   --  one row per feature (CSV rec) from "Find Compounds by Mol. Feature".
   --------------------------------------------------------------------------
   INSERT INTO observed_mass(dataset, peak_id, mass, rt, rt_width_at_half_ht, 
-          rt_start, rt_end, quantity, rel_quantity, min_z, max_z)
+      rt_start, rt_end, quantity, rel_quantity, min_z, max_z, dominant_z)
     SELECT
       dataset,
       cpd                              AS peak_id,
@@ -625,7 +633,9 @@ BEGIN
       sum(volume)::real                AS quantity,
       sum(volume)::real/v_max_volume   AS rel_quantity,
       min(min_z)                       AS min_z,
-      max(max_z)                       AS max_z
+      max(max_z)                       AS max_z,
+      (array_agg(component_charge ORDER BY component_volume DESC))[1]
+          AS dominant_z
     FROM molf_spectrum
     WHERE dataset = p_dataset
     GROUP BY dataset, cpd;

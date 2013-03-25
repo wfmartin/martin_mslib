@@ -103,6 +103,7 @@ CREATE TABLE observed_mass (
   rel_quantity               real,
   min_z                      integer,
   max_z                      integer,
+  dominant_z                 integer,
 
   merged_ids                 integer[],
   rt_adjustment_to_consensus real,

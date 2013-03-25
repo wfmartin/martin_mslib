@@ -22,6 +22,7 @@ CREATE OR REPLACE FUNCTION generate_merged_peaks(
       rt_end                 real,
       min_z                  integer,
       max_z                  integer,
+      dominant_z             integer,
       quantity               real,
       rel_quantity           real,
       merged_ids             integer[]
@@ -63,6 +64,8 @@ BEGIN
         AS rt_end,
     min(o.min_z) AS min_z,
     max(o.max_z) AS max_z,
+
+    (array_agg(o.dominant_z ORDER BY o.quantity DESC))[1] AS dominant_z,
 
     CASE WHEN p_old_dataset IS NULL THEN avg(o.quantity)::real
                                     ELSE sum(o.quantity)::real
@@ -158,7 +161,6 @@ END;
 $$;
 
 
-
 ------------------------------------------------------------------------------
 --  Create a new dataset from an existing one, merging together similar peaks
 --  (kind of overlapping).
@@ -211,11 +213,11 @@ BEGIN
   ------------------------------------------------------------------------
   INSERT INTO observed_mass(dataset,
       peak_id, mass, rt, rt_width_at_half_ht, rt_start, rt_end,
-      quantity, rel_quantity, min_z, max_z, merged_ids)
+      quantity, rel_quantity, min_z, max_z, dominant_z, merged_ids)
     SELECT
       p_new_dataset  AS dataset,
       peak_id, mass, rt, rt_width_at_half_ht, rt_start, rt_end,
-      quantity, rel_quantity, min_z, max_z, merged_ids
+      quantity, rel_quantity, min_z, max_z, dominant_z, merged_ids
     FROM generate_merged_peaks(p_old_dataset);
 
   GET DIAGNOSTICS v_num_rows := ROW_COUNT;
