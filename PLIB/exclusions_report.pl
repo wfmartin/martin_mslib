@@ -33,14 +33,14 @@ my $dbh;
   my $sth = $dbh->prepare('SELECT * FROM ms_exclusions_report(?)');
   $sth->execute($opts{consensus_id});
 
-  print 'AutoPreferredExcludeMSMSTable,,,,,,,,', "\n";
+  print 'AutoPreferredExcludeMSMSTable,,,,,,,,', "\r\n";
   print 'On,Prec. m/z,Delta m/z (ppm),Z,Prec. Type,Ret. Time (min),' .
-        'Delta Ret. Time (min),Iso. Width,Collision Energy', "\n";
+        'Delta Ret. Time (min),Iso. Width,Collision Energy', "\r\n";
 
   my $row;
   while ($row = $sth->fetchrow_hashref()) {
     print join(',', 'True', @{$row}{qw(mz delta_mz_ppm charge)}, 'Exclude',
-               @{$row}{qw(mz delta_rt)}, $opts{mz_width_string}, ''), "\n";
+               @{$row}{qw(mz delta_rt)}, $opts{mz_width_string}, ''), "\r\n";
   }
 
 }

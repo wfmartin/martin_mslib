@@ -29,16 +29,16 @@ my $dbh;
   my $sth = $dbh->prepare('SELECT * FROM ms_inclusions_report(?)');
   $sth->execute($opts{consensus_id});
 
-  print 'TargetedMSMSTable,,,,,,,';
+  print 'TargetedMSMSTable,,,,,,,', "\r\n";
   print 'On,Prec. m/z,Z,Ret. Time (min),Delta Ret. Time (min),' .
-                'Iso. Width,Collision Energy,Acquisition Time (ms/spec)';
+        'Iso. Width,Collision Energy,Acquisition Time (ms/spec)', "\r\n";
 
   my $count = 0;
   my $row;
   while (($count++) <= $opts{max_num_entries} and 
          $row = $sth->fetchrow_hashref()) {
     print join(',', 'True', @{$row}{qw(mz charge rt delta_rt)}, 
-               @{$row}{qw(mz delta_rt)}, $opts{mz_width_string}, '', ''), "\n";
+        @{$row}{qw(mz delta_rt)}, $opts{mz_width_string}, '', ''), "\r\n";
   }
 
 }
