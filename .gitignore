@@ -1,5 +1,9 @@
 test_data
 git_help
+DATA_FILES
 OTHER_FILES
+RUN
+EXCL
+PREF
 *.tar
 ?.*
