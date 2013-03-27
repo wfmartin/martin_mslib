@@ -867,6 +867,31 @@ $$;
 
 
 --------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION calibrant_ions_report(
+    p_lc_config_id           varchar)
+    RETURNS TABLE(
+      mz                     real,
+      delta_mz_ppm           real,
+      charge                 integer,
+      rt                     real,
+      delta_rt               real
+      )
+    LANGUAGE SQL AS $$
+
+  WITH t AS (SELECT * FROM lc_configuration WHERE lc_config_id = $1)
+  SELECT
+    ci.mz::real,
+    t.calibrant_error_ppm_limit,
+    ci.charge,
+    (t.theoretical_max_rt/2)::real AS rt,
+    (t.theoretical_max_rt/2)::real AS delta_rt
+  FROM calibrant_ion ci, t
+  WHERE ci.calibrant_ion_list_id = t.calibrant_ion_list_id;
+
+$$;
+
+
+--------------------------------------------------------------------------
 --  Get the  mz / z / rt  values to exclude from the next ms/ms run
 --  (not including the calibration ions).
 --------------------------------------------------------------------------
@@ -907,15 +932,7 @@ BEGIN
   -----------------------------------------------------------------------
   --  Calibrant ions
   -----------------------------------------------------------------------
-  RETURN QUERY
-    SELECT
-      ci.mz::real,
-      v_lc_config.calibrant_error_ppm_limit,
-      ci.charge,
-      (v_lc_config.theoretical_max_rt/2)::real AS rt,
-      (v_lc_config.theoretical_max_rt/2)::real AS delta_rt
-    FROM calibrant_ion ci
-    WHERE calibrant_ion_list_id = v_lc_config.calibrant_ion_list_id;
+  RETURN QUERY SELECT * FROM calibrant_ions_report(v_lc_config_id);
 
   -----------------------------------------------------------------------
   --  Perimeter (outside of interesting masses or retention times).
@@ -982,6 +999,7 @@ CREATE OR REPLACE FUNCTION ms_inclusions_report(
     p_consensus_id           varchar)
     RETURNS TABLE(
       mz                     real,
+      delta_mz_ppm           real,
       charge                 integer,
       rt                     real,
       delta_rt               real
@@ -997,9 +1015,10 @@ CREATE OR REPLACE FUNCTION ms_inclusions_report(
     )
   SELECT 
       (mass/dominant_z + t.charge_carrier_mass)::real AS mz,
+      (5e5*width(mass_rt_rectangle)/mass)::real  AS delta_mz_ppm,
       dominant_z AS charge,
       rt,
-      (rt_end - rt_start)/2::real  AS delta_rt
+      (0.5*height(mass_rt_rectangle))::real  AS delta_rt
   FROM consensus_compound, t
   WHERE consensus_id = $1  AND (NOT exclude_compound) AND 
         (NOT msms_only)

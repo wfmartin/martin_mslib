@@ -40,7 +40,7 @@ my $dbh;
   my $row;
   while ($row = $sth->fetchrow_hashref()) {
     print join(',', 'True', @{$row}{qw(mz delta_mz_ppm charge)}, 'Exclude',
-               @{$row}{qw(mz delta_rt)}, $opts{mz_width_string}, ''), "\r\n";
+               @{$row}{qw(rt delta_rt)}, $opts{mz_width_string}, ''), "\r\n";
   }
 
 }
