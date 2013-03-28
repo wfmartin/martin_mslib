@@ -1,11 +1,3 @@
-*
-!EXAMPLE_FILES
-!PLIB
-!core
-!agilent
-!gpm
-!all.sql
-!.gitignore
-!README
-!perl_packages
-!test_perl_pkg_install.pl
+DATA_FILES
+RUN
+MISC
