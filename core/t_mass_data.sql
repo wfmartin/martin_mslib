@@ -45,8 +45,7 @@ CREATE TABLE lc_configuration(
   theoretical_max_rt         real,  -- time at end of rt run
   calibrant_ion_list_id      varchar,
   calibrant_error_ppm_limit  real,
-  charge_carrier_mass        double precision,
-  fragments_threshold        integer  -- how much is sufficiently fragmented.
+  charge_carrier_mass        double precision
 );
 
 

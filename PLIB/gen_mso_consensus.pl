@@ -17,6 +17,7 @@ use DBI;
 use DBD::Pg;
 use Getopt::Long;
 use POSIX;
+use File::Spec;
 
 use ms_db;
 use opts_w_file;
@@ -31,16 +32,18 @@ sub load_data {
   my $sth_load = $dbh->prepare('SELECT load_molf_data(?,?,?,?,?)');
   my $sth_import = $dbh->prepare('SELECT import_molf_data(?,?)');
 
+  my $dir = File::Spec->rel2abs($inputs_folder);
+
   foreach my $dataset (@$a_datasets) {
     for (qw(csv cef)) {
-      my $fname = "$inputs_folder/$dataset.$_";
+      my $fname = "$dir/$dataset.$_";
       -f $fname  or die "File $fname doesn't exist.\n";
       -r $fname  or die "File $fname is not readable.\n";
     }
 
     print "Dataset = $dataset\n";
 
-    my $f_stem = "$inputs_folder/$dataset";
+    my $f_stem = "$dir/$dataset";
     $sth_load->execute($dataset, $lc_config_id,
             $f_stem . '.csv', $f_stem . '.cef', undef) or
         die "Error (load_molf_data)\n";

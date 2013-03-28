@@ -436,597 +436,6 @@ $$;
 
 
 --------------------------------------------------------------------------
---  Return large rectangles in the mass x rt plane (constrained to the ranges
---  of interesting masses and retention times) that should be excluded
---  from tandem fragmentation.
---
---  Look for relatively large mass ranges (relative to measurement precision)
---  that are mostly to be excluded, i.e., they contain at most 2 compounds
---  which would break up the rectangle.
---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION get_wide_mass_bands(
-    p_consensus_id           varchar)
-    RETURNS SETOF box
-    LANGUAGE plpgsql AS $$
-DECLARE
-  v_cons_parms               record;
-  v_cpds                     cons_cpd_info[];
-  v_total_num_cpds           integer;
-  v_num_cpds                 integer;
-  v_inds_used                integer[];
-  v_inds                     integer[];
-  v_i                        integer;
-  v_lo_mass                  double precision;
-  v_hi_mass                  double precision;
-  v_lo_rt                    double precision;
-  v_hi_rt                    double precision;
-BEGIN
-  SELECT * INTO v_cons_parms
-  FROM sample_consensus
-  JOIN consensus_parameters USING(consensus_parameters_key)
-  WHERE consensus_id = p_consensus_id;
-
-  SELECT
-    array_agg((consensus_compound_id,mass,rt_start,rt_end)::cons_cpd_info
-        ORDER BY mass),
-    count(*)
-  INTO v_cpds, v_total_num_cpds
-  FROM consensus_compound
-  WHERE consensus_id = p_consensus_id AND
-        mass BETWEEN v_cons_parms.min_mass AND v_cons_parms.max_mass;
-
-  FOR v_i, v_num_cpds IN
-    WITH 
-      -------------------------------------------------------------------
-      --  num_cpds         : Number of compounds disrupting band
-      --  min_mass_ppm_gap : Minimum mass width of band, depends upon num_cpds
-      -------------------------------------------------------------------
-      tmp_lim(num_cpds, min_mass_ppm_gap) AS (VALUES
-        (0,             v_cons_parms.band_mass_width_ppm),
-        (1, 1.3::real * v_cons_parms.band_mass_width_ppm),
-        (2, 1.5::real * v_cons_parms.band_mass_width_ppm)
-        ),
-      -------------------------------------------------------------------
-      --  Generate all combinations of starting index (i) and number of 
-      --  compound masses in the band, plus for each of those:
-      --   1) mass ppm difference between lowest and highest masses
-      --   2) max ppm mass difference for number of compounds
-      -------------------------------------------------------------------
-      tmp_pass_1 AS (
-        SELECT
-          i,
-          num_cpds,
-          min_mass_ppm_gap,
-          (1e6*(v_cpds[i+num_cpds+1].mass - v_cpds[i].mass)/v_cpds[i].mass)
-              AS mass_ppm_diff
-        FROM tmp_lim,
-             generate_series(0, v_total_num_cpds-2) AS i
-        )
-      SELECT i, num_cpds
-      FROM tmp_pass_1
-      WHERE mass_ppm_diff >= min_mass_ppm_gap
-      ORDER BY (mass_ppm_diff/min_mass_ppm_gap) DESC
-  LOOP
-    --------------------------------------------------------------------
-    --  To efficiently check for band overlaps, the range of indices
-    --  (inclusive of the starting index, exclusive of the end index) is
-    --  compared to the accumulation of such indices from previous iterations.
-    --------------------------------------------------------------------
-    v_inds := array[]::integer[];
-    FOR i IN 0 .. v_num_cpds  LOOP
-      v_inds[i] := v_i+i;
-    END LOOP;
-
-    --  Skip if the some of the given compounds have already been handled.
-    CONTINUE WHEN COALESCE(v_inds && v_inds_used, False);
-
-    --------------------------------------------------------------------------
-    --  The bounds of the mass bands.
-    --------------------------------------------------------------------------
-    v_lo_mass := v_cpds[v_i].mass
-                 * (1+1e-6*v_cons_parms.band_mass_margin_ppm);
-    v_hi_mass := v_cpds[v_i+v_num_cpds+1].mass
-                 * (1-1e-6*v_cons_parms.band_mass_margin_ppm);
-
-    IF v_num_cpds = 2 THEN
-      ------------------------------------------------------------------------
-      -- Combine retention time ranges if they overlap; treat as num_cpds = 1
-      ------------------------------------------------------------------------
-      IF ranges_overlap(v_cpds[v_i+1].rt_start, v_cpds[v_i+1].rt_end,
-          v_cpds[v_i+2].rt_start - v_cons_parms.band_rt_margin,
-          v_cpds[v_i+2].rt_end   + v_cons_parms.band_rt_margin)   THEN
-
-        -- upper bound for rt starting at min_rt
-        v_lo_rt := LEAST(v_cpds[v_i+1].rt_start, v_cpds[v_i+2].rt_start)
-            - v_cons_parms.band_rt_margin;
-        -- lower bound for rt ending at max_rt
-        v_hi_rt := GREATEST(v_cpds[v_i+1].rt_end, v_cpds[v_i+2].rt_end)
-            + v_cons_parms.band_rt_margin;
-        v_num_cpds := 1;
-
-      ELSE  -- trifurcate region
-        v_lo_rt := v_cons_parms.min_rt;
-        v_hi_rt := LEAST(v_cpds[v_i+1].rt_start, v_cpds[v_i+2].rt_start)
-            - v_cons_parms.band_rt_margin;
-        IF (v_hi_rt - v_lo_rt >= v_cons_parms.band_min_rt_height) THEN
-          RETURN NEXT box(
-            point(v_lo_mass, v_lo_rt),
-            point(v_hi_mass, v_hi_rt)
-            );
-        END IF;
-
-        v_lo_rt := LEAST(v_cpds[v_i+1].rt_end, v_cpds[v_i+2].rt_end)
-                + v_cons_parms.band_rt_margin;
-        v_hi_rt := GREATEST(v_cpds[v_i+1].rt_start, v_cpds[v_i+2].rt_start)
-                - v_cons_parms.band_rt_margin;
-
-        IF (v_hi_rt - v_lo_rt >= v_cons_parms.band_min_rt_height) THEN
-          RETURN NEXT box(
-            point(v_lo_mass, v_lo_rt),
-            point(v_hi_mass, v_hi_rt)
-            );
-        END IF;
-
-        v_lo_rt := GREATEST(v_cpds[v_i+1].rt_end, v_cpds[v_i+2].rt_end)
-            + v_cons_parms.band_rt_margin;
-        v_hi_rt := v_cons_parms.max_rt;
-
-        IF (v_hi_rt - v_lo_rt >= v_cons_parms.band_min_rt_height) THEN
-          RETURN NEXT box(
-            point(v_lo_mass, v_lo_rt),
-            point(v_hi_mass, v_hi_rt)
-            );
-        END IF;
-      END IF;
-    END IF;
-
-    IF v_num_cpds = 1 THEN  -- bifurcate region
-      -- Low and high rt for the compound that breaks up the band:
-      v_lo_rt := COALESCE(v_lo_rt,
-              v_cpds[v_i+1].rt_start + v_cons_parms.band_rt_margin);
-      v_hi_rt := COALESCE(v_hi_rt,
-              v_cpds[v_i+1].rt_end   - v_cons_parms.band_rt_margin);
-
-      IF (v_lo_rt - v_cons_parms.min_rt >= v_cons_parms.band_min_rt_height)
-      THEN
-        RETURN NEXT box(
-          point(v_lo_mass, v_cons_parms.min_rt::double precision),
-          point(v_hi_mass, v_lo_rt)
-          );
-      END IF;
-
-      IF (v_cons_parms.max_rt - v_hi_rt >= v_cons_parms.band_min_rt_height)
-      THEN
-        RETURN NEXT box(
-          point(v_lo_mass, v_hi_rt),
-          point(v_hi_mass, v_cons_parms.max_rt::double precision)
-          );
-      END IF;
-
-    ELSIF v_num_cpds = 0 THEN
-      RETURN NEXT box(
-        point(v_lo_mass, v_cons_parms.min_rt::double precision),
-        point(v_hi_mass, v_cons_parms.max_rt::double precision)
-        );
-    END IF;
-   
-    v_inds_used := v_inds_used || v_inds;
-
-  END LOOP;
-
-END;
-$$;
-
-
---------------------------------------------------------------------------
---  Determine which mass/charge combinations are to be excluded in the
---  next mass run.
---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION determine_ms_exclusions(
-    p_consensus_id           varchar)
-    RETURNS TABLE(
-      excluded_area          box,
-      min_z                  integer,
-      max_z                  integer,
-      excl_type              varchar
-    )
-    LANGUAGE plpgsql AS $$
-DECLARE
-  v_default_min_z            integer;
-  v_default_max_z            integer;
-  v_redundant_overlap        real;
-  v_origin                   point;
-BEGIN
-  SELECT redundant_overlap, default_min_z, default_max_z
-  INTO v_redundant_overlap, v_default_min_z, v_default_max_z
-  FROM sample_consensus
-  JOIN consensus_parameters cp USING(consensus_parameters_key)
-  JOIN lc_configuration USING(lc_config_id)
-  WHERE consensus_id = p_consensus_id;
-
-  ---------------------------------------------------------------------------
-  --  Put regions for excluded compounds in the tmp_comp table.
-  --  Make wide mass bands of excluded rectangles in mass X rt plane.
-  ---------------------------------------------------------------------------
-  CREATE TEMP SEQUENCE tmp_seq;  -- temp ids involved in clustering
-
-  CREATE TEMP TABLE tmp_comp AS
-    SELECT
-      nextval('tmp_seq')::integer AS comp_id,
-      mass_rt_rectangle,
-      o.min_z,
-      o.max_z
-    FROM obs_mass_no_cons o
-    WHERE consensus_id = p_consensus_id
-    UNION ALL
-    SELECT
-      nextval('tmp_seq')::integer AS comp_id,
-      mass_rt_rectangle,
-      cc.min_z,
-      cc.max_z
-    FROM consensus_compound cc
-    WHERE consensus_id = p_consensus_id AND exclude_compound;
-
-  --  Make wide mass bands of excluded rectangles in mass X rt plane.
-  CREATE TEMP TABLE tmp_bands AS 
-    SELECT
-      nextval('tmp_seq')::integer AS band_id,
-      get_wide_mass_bands(p_consensus_id) AS excluded_area;
-
-  DROP SEQUENCE tmp_seq;
-
-  -----------------------------------------------------------------------
-  --  Join mass bands to individual excluded compounds to get the charges,
-  --  and also to determine which compounds are separate from the mass bands.
-  -----------------------------------------------------------------------
-  RETURN QUERY 
-    SELECT
-      (array_agg(b.excluded_area))[1] AS excluded_area,
-      COALESCE(min(c.min_z), v_default_min_z)  AS min_z,
-      COALESCE(max(c.max_z), v_default_max_z)  AS max_z,
-      'mass_band'::varchar  AS excl_type
-    FROM tmp_bands b LEFT OUTER JOIN tmp_comp c
-         ON( b.excluded_area && mass_rt_rectangle)
-    GROUP BY band_id;
-
-  -----------------------------------------------------------------------
-  --  Join to the mass bands to figure out which compounds are redundant;
-  --  delete the redundant compounds.
-  -----------------------------------------------------------------------
-  DELETE FROM tmp_comp c
-  USING tmp_bands b
-  WHERE box_overlap_proportion(mass_rt_rectangle, b.excluded_area)
-        >= v_redundant_overlap;
-
-  ---------------------------------------------------------------------------
-  --  Cluster compounds by overlaps and combine them.
-  ---------------------------------------------------------------------------
-  CREATE TEMP TABLE tmp_pair AS
-    WITH pass_1 AS (
-      SELECT t1.comp_id AS id_1, t2.comp_id AS id_2
-      FROM tmp_comp t1, tmp_comp t2
-      WHERE t1.comp_id < t2.comp_id  AND
-            t1.mass_rt_rectangle && t2.mass_rt_rectangle
-      )
-    SELECT id_1, id_2
-    FROM pass_1
-    UNION
-    SELECT id_2, id_1
-    FROM pass_1;
-
-  CREATE TEMP TABLE tmp_all_ids AS SELECT comp_id AS id FROM tmp_comp;
-  CREATE TEMP TABLE tmp_cluster AS SELECT * FROM cluster_ids();
-
-  RETURN QUERY
-    SELECT
-      encompassing_box(array_agg(mass_rt_rectangle))  AS excluded_area,
-      min(c.min_z) AS min_z,
-      max(c.max_z) AS max_z,
-      'obs_mass_no_cons'::varchar  AS excl_type
-    FROM tmp_cluster JOIN tmp_comp c ON(id = comp_id)
-    GROUP BY cluster_id;
-
-  DROP TABLE tmp_comp, tmp_bands, tmp_pair, tmp_all_ids, tmp_cluster;
-END;
-$$;
-
-
---------------------------------------------------------------------------
---
---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION generate_exclusion_list(
-    p_consensus_id           varchar)
-    RETURNS integer
-    LANGUAGE plpgsql AS $$
-DECLARE
-  v_iteration                integer;
-  v_bounding_area            real;
-BEGIN
-  CREATE TEMP TABLE tmp_excl AS
-    SELECT * FROM determine_ms_exclusions(p_consensus_id);
-
-  SELECT COALESCE(max(iteration), 0) + 1, (array_agg(bounding_area))[1]
-  INTO v_iteration, v_bounding_area
-  FROM ms_exclusion_iteration
-  WHERE consensus_id = p_consensus_id;
-
-  IF v_bounding_area IS NULL THEN
-    SELECT (max_mass-min_mass)*(max_rt-min_rt)
-    INTO v_bounding_area
-    FROM sample_consensus 
-    JOIN consensus_parameters USING(consensus_parameters_key)
-    WHERE consensus_id = p_consensus_id;
-  END IF;
-
-  INSERT INTO ms_exclusion(consensus_id, iteration, excluded_area,
-                           min_z, max_z, excl_type)
-    SELECT
-      p_consensus_id,
-      v_iteration,
-      excluded_area,
-      min_z,
-      max_z,
-      excl_type
-    FROM tmp_excl;
-
-  INSERT INTO ms_exclusion_iteration(consensus_id, iteration, area_count,
-                                     total_area, bounding_area)
-    SELECT
-      p_consensus_id,
-      v_iteration,
-      count(*) AS area_count,
-      sum(area(excluded_area))::real AS total_area,
-      v_bounding_area
-    FROM tmp_excl;
-
-  RETURN v_iteration;
-END;
-$$;
-
-
---------------------------------------------------------------------------
---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION get_perimeter_exclusions(
-    p_lc_config_id           varchar,
-    p_min_mass               real,   -- range of interesting masses
-    p_max_mass               real,
-    p_min_rt                 real,   -- range of interesting rt
-    p_max_rt                 real,
-    p_min_z                  integer,
-    p_max_z                  integer)
-    RETURNS TABLE(
-      mz                     real,
-      delta_mz_ppm           real,
-      charge                 integer,
-      rt                     real,
-      delta_rt               real
-      )
-    LANGUAGE plpgsql AS $$
-DECLARE
-  v_lc_conf                  lc_configuration;
-  v_mz_lower_bound           real;
-BEGIN
-  SELECT * INTO v_lc_conf
-  FROM lc_configuration
-  WHERE lc_config_id = p_lc_config_id;
-
-  ------------------------------------------------------------------------
-  -- Scenarios of full mz range:
-  --  1) rt < interesting rt range
-  --  2) rt > interesting rt range
-  ------------------------------------------------------------------------
-  RETURN QUERY
-  WITH tmp_rt(rt, delta_rt) AS ( VALUES
-     ( p_min_rt/2::real, p_min_rt/2::real),
-     ( (v_lc_conf.theoretical_max_rt + p_max_rt)/2::real,
-       (v_lc_conf.theoretical_max_rt - p_max_rt)/2::real )
-     )
-  SELECT 
-    v_lc_conf.theoretical_max_mz::real/2::real  AS mz,
-    5e5::real  AS delta_mz_ppm,  -- (50%)
-    z AS charge,
-    tmp_rt.rt  AS rt,
-    tmp_rt.delta_rt  AS delta_rt
-  FROM tmp_rt
-  CROSS JOIN generate_series(p_min_z, p_max_z) AS z;
-
-  ------------------------------------------------------------------------
-  --  Scenarios of full rt range:
-  --  mz values must be computed for all charges
-  ------------------------------------------------------------------------
-  rt := v_lc_conf.theoretical_max_rt/2::real;
-  delta_rt := rt;
-
-  FOR z IN p_min_z .. p_max_z  LOOP
-    charge := z;
-    ------------------------------------------------------------------------
-    --  mass < interesting masses
-    --  (mz is based upon midpoint between zero and minimum interesting mass)
-    ------------------------------------------------------------------------
-    mz := 0.5 * p_min_mass/charge + v_lc_conf.charge_carrier_mass;
-    delta_mz_ppm := 5e5;  -- ( 50% )
-    RETURN NEXT;
-
-    ------------------------------------------------------------------------
-    --  mass > interesting masses
-    --  (mz is based upon midpoint maximum interesting mass and 
-    --   instrument's max mz sensitivity)
-    --  rt is full range
-    ------------------------------------------------------------------------
-    v_mz_lower_bound := p_max_mass/charge + v_lc_conf.charge_carrier_mass;
-    IF v_mz_lower_bound < v_lc_conf.theoretical_max_mz  THEN
-      mz := (v_mz_lower_bound + v_lc_conf.theoretical_max_mz)/2;
-      delta_mz_ppm :=
-          1e6 * (v_lc_conf.theoretical_max_mz - v_mz_lower_bound )/(2*mz);
-      RETURN NEXT;
-    END IF;
-  END LOOP;
-
-END;
-$$;
-
-
---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION calibrant_ions_report(
-    p_lc_config_id           varchar)
-    RETURNS TABLE(
-      mz                     real,
-      delta_mz_ppm           real,
-      charge                 integer,
-      rt                     real,
-      delta_rt               real
-      )
-    LANGUAGE SQL AS $$
-
-  WITH t AS (SELECT * FROM lc_configuration WHERE lc_config_id = $1)
-  SELECT
-    ci.mz::real,
-    t.calibrant_error_ppm_limit,
-    ci.charge,
-    (t.theoretical_max_rt/2)::real AS rt,
-    (t.theoretical_max_rt/2)::real AS delta_rt
-  FROM calibrant_ion ci, t
-  WHERE ci.calibrant_ion_list_id = t.calibrant_ion_list_id;
-
-$$;
-
-
---------------------------------------------------------------------------
---  Get the  mz / z / rt  values to exclude from the next ms/ms run
---  (not including the calibration ions).
---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION ms_exclusions_report(
-    p_consensus_id           varchar,
-    p_iteration              integer)
-    RETURNS TABLE(
-      mz                     real,
-      delta_mz_ppm           real,
-      charge                 integer,
-      rt                     real,
-      delta_rt               real
-      )
-    LANGUAGE plpgsql AS $$
-DECLARE
-  v_iteration                integer;
-  v_cons_parms               consensus_parameters;
-  v_lc_config                lc_configuration;
-BEGIN
-  v_iteration := p_iteration;
-
-  SELECT * INTO v_cons_parms
-  FROM consensus_parameters
-  WHERE consensus_parameters_key =
-        (SELECT consensus_parameters_key FROM sample_consensus
-         WHERE consensus_id = p_consensus_id);
-
-  SELECT * INTO v_lc_config
-  FROM lc_configuration 
-  WHERE lc_config_id = v_cons_parms.lc_config_id;
-
-  IF v_iteration IS NULL THEN
-    SELECT max(iteration) INTO v_iteration
-    FROM ms_exclusion_iteration
-    WHERE consensus_id = p_consensus_id;
-  END IF;
-
-  -----------------------------------------------------------------------
-  --  Calibrant ions
-  -----------------------------------------------------------------------
-  RETURN QUERY SELECT * FROM calibrant_ions_report(v_lc_config_id);
-
-  -----------------------------------------------------------------------
-  --  Perimeter (outside of interesting masses or retention times).
-  -----------------------------------------------------------------------
-  RETURN QUERY
-    SELECT * FROM get_perimeter_exclusions(
-        v_cons_parms.lc_config_id,
-        v_cons_parms.min_mass,
-        v_cons_parms.max_mass,
-        v_cons_parms.min_rt,
-        v_cons_parms.max_rt,
-        v_cons_parms.default_min_z,
-        v_cons_parms.default_max_z);
-   
-  -----------------------------------------------------------------------
-  --  Regions informed by MS/MS runs and GPM identifications, as stored in
-  --  the ms_exclusion table.
-  -----------------------------------------------------------------------
-  IF v_iteration IS NOT NULL THEN
-    RETURN QUERY 
-      WITH pass_1 AS (
-        SELECT
-          ( (center(excluded_area))[0]/z
-             + v_lc_config.charge_carrier_mass)::real  AS mz,
-          (5e5 * width(excluded_area)/(center(excluded_area))[0])::real
-              AS delta_mz_ppm,
-          z AS charge,
-          (center(excluded_area))[1]::real AS rt,
-          (0.5 * height(excluded_area))::real  AS delta_rt
-        FROM ms_exclusion CROSS JOIN generate_series(1, 9) AS z
-        WHERE consensus_id = p_consensus_id  AND iteration = v_iteration  AND
-              (center(excluded_area))[0]::real < v_cons_parms.max_mass  AND
-              z BETWEEN min_z and max_z
-        )
-      SELECT p.mz, p.delta_mz_ppm, p.charge, p.rt, p.delta_rt
-      FROM pass_1 p
-      WHERE p.mz < v_lc_config.theoretical_max_mz;
-  END IF;
-END;
-$$;
-
-
---------------------------------------------------------------------------
---  Get the MS exclusions for the latest run.
---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION ms_exclusions_report(
-    p_consensus_id           varchar)
-    RETURNS TABLE(
-      mz                     real,
-      delta_mz_ppm           real,
-      charge                 integer,
-      rt                     real,
-      delta_rt               real
-      )
-    LANGUAGE SQL AS $$
-
-  SELECT * FROM ms_exclusions_report($1, NULL);
-
-$$;
-
-
---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION ms_inclusions_report(
-    p_consensus_id           varchar)
-    RETURNS TABLE(
-      mz                     real,
-      delta_mz_ppm           real,
-      charge                 integer,
-      rt                     real,
-      delta_rt               real
-      )
-    LANGUAGE SQL AS $$
-
-  WITH t AS (
-    SELECT charge_carrier_mass
-    FROM sample_consensus
-    JOIN consensus_parameters USING(consensus_parameters_key)
-    JOIN lc_configuration USING(lc_config_id)
-    WHERE consensus_id = $1
-    )
-  SELECT 
-      (mass/dominant_z + t.charge_carrier_mass)::real AS mz,
-      (5e5*width(mass_rt_rectangle)/mass)::real  AS delta_mz_ppm,
-      dominant_z AS charge,
-      rt,
-      (0.5*height(mass_rt_rectangle))::real  AS delta_rt
-  FROM consensus_compound, t
-  WHERE consensus_id = $1  AND (NOT exclude_compound) AND 
-        (NOT msms_only)
-  ORDER BY quantity DESC;
-$$;
-
-
---------------------------------------------------------------------------
 --  Returns the position (one-based index) of the peptide in the protein.
 --------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION get_peptide_position(
@@ -1060,3 +469,110 @@ CREATE OR REPLACE FUNCTION consensus_remove_match(
     VALUES($1,$2,$3);
 $$;
 
+
+--------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION msms_guidance_report(
+    p_consensus_id           varchar)
+    RETURNS TABLE(
+      mz                     double precision,
+      delta_mz_ppm           real,
+      charge                 integer,
+      rt                     real,
+      delta_rt               real,
+      exclude                boolean
+      )
+    LANGUAGE plpgsql AS $$
+DECLARE
+  v_cons_parms               consensus_parameters;
+  v_lc_conf                  lc_configuration;
+  v_max_excl_pref_list_length integer;
+  v_num_calibrants           integer;
+  v_num_exclude_peaks        integer;
+BEGIN
+  SELECT * INTO v_cons_parms
+  FROM consensus_parameters
+  WHERE consensus_parameters_key =
+        (SELECT consensus_parameters_key FROM sample_consensus
+         WHERE consensus_id = p_consensus_id);
+
+  SELECT * INTO v_lc_conf
+  FROM lc_configuration
+  WHERE lc_config_id = v_cons_parms.lc_config_id;
+
+  -----------------------------------------------------------------------
+  --  Always exclude the calibrant ions.
+  -----------------------------------------------------------------------
+  RETURN QUERY 
+    SELECT
+      ci.mz,
+      2::real*v_lc_conf.calibrant_error_ppm_limit  AS delta_mz_ppm,
+      ci.charge,
+      (v_lc_conf.theoretical_max_rt/2)::real AS rt,
+      v_lc_conf.theoretical_max_rt::real AS delta_rt,
+      True AS exclude
+    FROM calibrant_ion ci
+    WHERE ci.calibrant_ion_list_id = v_lc_conf.calibrant_ion_list_id;
+
+  SELECT count(*) INTO v_num_calibrants
+  FROM calibrant_ion
+  WHERE calibrant_ion_list_id = v_lc_conf.calibrant_ion_list_id;
+
+  -----------------------------------------------------------------------
+  --  Assemble compounds to be excluded.
+  -----------------------------------------------------------------------
+  CREATE TEMP TABLE tmp_exclude_masses AS 
+    SELECT
+      mass,
+      (1e6 * width(mass_rt_rectangle)/mass)::real AS delta_mz_ppm,
+      cc.min_z,
+      cc.max_z,
+      cc.rt,
+      (height(mass_rt_rectangle))::real   AS delta_rt
+    FROM consensus_compound cc
+    WHERE consensus_id = p_consensus_id  AND exclude_compound;
+
+  SELECT COALESCE(sum(max_z-min_z+1),0)
+  INTO v_num_exclude_peaks
+  FROM tmp_exclude_masses;
+
+  -----------------------------------------------------------------------
+  --  If the exclusion list is not too long, use it.
+  -----------------------------------------------------------------------
+  IF v_num_exclude_peaks + v_num_calibrants <=
+        v_cons_parms.max_excl_pref_list_length  THEN
+    RETURN QUERY
+      SELECT
+        ((e.mass/z) + v_lc_conf.charge_carrier_mass)::double precision AS mz,
+        e.delta_mz_ppm,
+        z AS charge,
+        e.rt,
+        e.delta_rt,
+        True AS exclude
+      FROM tmp_exclude_masses e, generate_series(1, 9) AS z
+      WHERE z BETWEEN min_z and max_z  AND
+            (e.mass/z) + v_lc_conf.charge_carrier_mass
+              < v_lc_conf.theoretical_max_mz;
+
+  -----------------------------------------------------------------------
+  --  Otherwise use a preferred list.
+  -----------------------------------------------------------------------
+  ELSE
+    RETURN QUERY
+      SELECT
+        ((cc.mass/cc.dominant_z) + v_lc_conf.charge_carrier_mass)
+            ::double precision AS mz,
+        (1e6 * width(mass_rt_rectangle)/mass)::real AS delta_mz_ppm,
+        cc.dominant_z  AS charge,
+        cc.rt,
+        (height(cc.mass_rt_rectangle))::real   AS delta_rt,
+        False AS exclude
+      FROM consensus_compound cc
+      WHERE consensus_id = p_consensus_id  AND NOT exclude_compound
+      ORDER BY quantity
+      LIMIT (v_max_excl_pref_list_length - v_num_calibrants);
+  END IF;
+
+  DROP TABLE tmp_exclude_masses;
+
+END;
+$$;

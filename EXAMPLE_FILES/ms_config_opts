@@ -1,32 +1,22 @@
-lc_config_id= default      
+lc_config_id=default      
 consensus_parameters_key=def_cons_parms
 min_num_peaks=2
 min_featurelinker_quality=0.3
-min_featurelinker_num_items=2
+min_featurelinker_num_items=3
 mass_ppm_error_limit=12.0
 max_rt_gap=2.0 
 cons_max_rt_diff=4.0       
-max_frag_attempts=3
-max_ident_attempts=2
+max_frag_attempts=2
+max_ident_attempts=3
+max_excl_pref_list_length=4000
 rect_mass_ppm_width=12
 rect_rt_min_height=1
 bio_context_id=human_milk  
 bio_context_description='human milk'
-band_mass_width_ppm=300
-band_mass_margin_ppm=5
-band_min_rt_height=4
-band_rt_margin=1
-min_mass=400
-max_mass=4000
-min_rt=6
-max_rt=36
-default_min_charge=1
-default_max_charge=6
-consensus_id=mso
 lc_config_id=default
 lc_config_description='the solvent gradient should be here'
 bio_context_id=human_milk
-proteins_fasta_file=/home/bmartin/martin_mslib/gpm/HumanMilk_6.23.2012_UniprotQueryBased.fasta
+proteins_fasta_file=/home/bmartin/martin_mslib/gpm/small.fasta
 gpm_default_input=/home/bmartin/SW/GPM/tandem-linux-11-12-01-1/bin/default_input.xml
 gpm_parameters_key=pep_defaults
 rt_allowed_gap=2.0
@@ -36,10 +26,9 @@ theoretical_max_mz=2850
 calibrant_ion_list_id=ex
 calibrant_error_ppm_limit=10
 charge_carrier_mass=1.00727
-calibrant_ions_file=calibrant_mz_values
+calibrant_ions_file=/home/bmartin/martin_mslib/calibrant_mz_values
 cons_matching_params_key=def_match_params
 use_decoy!
-decoy_is_random!
 gfdb_mass_ppm_tolerance=10
 gfdb_use_phosphorylation!
 # gfdb_other_options

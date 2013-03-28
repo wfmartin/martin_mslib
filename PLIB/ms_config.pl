@@ -72,40 +72,16 @@ my @opts_specs = (
   # Times to attempt identifying fragmented cpd before putting in excl list.
   'max_ident_attempts=i',
 
+  'max_excl_pref_list_length=i',
+
   # Used in generating mass_rt_rectangle values:
   'rect_mass_ppm_width=f',
   'rect_rt_min_height=f',
   
-  # In obs_mass_no_cons table, retention time range is made at least this wide
-  # (mostly to compensate for when rt_start and rt_end aren't available).
-  'fake_rt_margin=f',
-
-  #---------------------------------------------------------------------------
-  # Used by 'get_wide_mass_bands' function (which creates excluded mass bands).
-  #---------------------------------------------------------------------------
-  'band_mass_width_ppm=f',
-  'band_mass_margin_ppm=f',
-
-  # Don't bother with bands shorter (less rt range) than this:
-  'band_min_rt_height=f',
-  'band_rt_margin=f',
-
-  # The range of interesting masses and retention times:
-  'min_mass=f',
-  'max_mass=f',
-  'min_rt=f',
-  'max_rt=f',
-
-  # The default charges range when actual charges are unknown.
-  'default_min_z=i',
-  'default_max_z=i',
-
   'max_rt_gap=f',
   'min_num_peaks=i',
   'inputs_folder=s',
   'bio_context_id=s',
-
-  'redundant_overlap=f',
 
 #---------------------------------------------------------------------------
 # For cons_matching_params table:
@@ -147,13 +123,6 @@ sub print_help {
   #------------------------------------------------------------------------
   $opts{max_rt_gap} = 0  unless defined($opts{max_rt_gap});
   $opts{min_num_peaks}        ||= 2;
-  $opts{band_mass_width_ppm}  ||= 300;
-  $opts{band_mass_margin_ppm} ||= 5;
-  $opts{band_min_rt_height}   ||= 4;
-  $opts{band_rt_margin}       ||= 1;
-  $opts{default_min_z}        ||= 1;
-  $opts{default_max_z}        ||= 6;
-  $opts{redundant_overlap}    ||= 0.5;
 
   $dbh = ms_db::open_db(%opts);
   print "Database successfully opened\n\n";
@@ -305,11 +274,8 @@ sub print_help {
            mass_ppm_error_limit cons_max_rt_diff 
            min_featurelinker_quality 
            max_frag_attempts max_ident_attempts
+           max_excl_pref_list_length
            rect_mass_ppm_width rect_rt_min_height
-           band_mass_width_ppm band_mass_margin_ppm
-           band_min_rt_height band_rt_margin
-           min_mass max_mass min_rt max_rt
-           default_min_z default_max_z redundant_overlap
           );
 
     push @cons_param_cols, 'min_quantity'  if ($opts{min_quantity});

@@ -19,27 +19,13 @@ CREATE TABLE consensus_parameters(
   max_frag_attempts          integer,
   -- Times to attempt identifying fragmented cpd before putting in excl list
   max_ident_attempts         integer,
+
+  -- Maximum number of items in the exclusion/preferred list.
+  max_excl_pref_list_length  integer,
   
   -- Minimum width (mass) and height (rt) for mass_rt_rectangle
   rect_mass_ppm_width        real,
-  rect_rt_min_height         real,
-
- -- Parameters for get_wide_mass_bands:
-  band_mass_width_ppm        real  DEFAULT 300,
-  band_mass_margin_ppm       real  DEFAULT 5,  -- width around targeted mass
-  band_min_rt_height         real  DEFAULT 4,
-  band_rt_margin             real  DEFAULT 1,
-
-  min_mass                   real,  -- possible range of interesting masses
-  max_mass                   real,
-  min_rt                     real,  -- possible range of interesting rt
-  max_rt                     real,
-
-  -- When creating the exclusions list, use these when charges are unknown:
-  default_min_z              integer  DEFAULT 1, 
-  default_max_z              integer  DEFAULT 6,
-
-  redundant_overlap          real
+  rect_rt_min_height         real
 );
 
 
@@ -326,35 +312,3 @@ CREATE TABLE obs_mass_promoted(
   match_run_id               integer,   -- run causing promotion
   consensus_compound_id      integer
 );
-
-
--------------------------------------------------------------------------
-CREATE TABLE ms_exclusion_iteration(
-  consensus_id               varchar,
-  iteration                  integer,
-  area_count                 integer,
-  total_area                 real,
-  bounding_area              real
-);
-
-
--------------------------------------------------------------------------
-CREATE TABLE ms_exclusion(
-  consensus_id               varchar,
-  iteration                  integer,
-
-  excluded_area              box,
-  min_z                      integer,
-  max_z                      integer,
-  excl_type                  varchar
-);
-
-
--------------------------------------------------------------------------
-CREATE TYPE cons_cpd_info AS (
-  consensus_cpd_id           integer,
-  mass                       double precision,
-  rt_start                   real,
-  rt_end                     real
-);
-

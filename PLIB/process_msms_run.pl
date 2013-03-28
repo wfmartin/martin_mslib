@@ -11,6 +11,7 @@ use DBI;
 use DBD::Pg;
 #use Getopt::Long;
 use POSIX;
+use File::Spec;
 
 use opts_w_file;
 use ms_db;
@@ -51,7 +52,8 @@ my $dbh;
   #  as base name.
   #-------------------------------------------------------------------
   if ($opts{inputs_folder}) {
-    $opts{$_} ||= "$opts{inputs_folder}/$opts{dataset}.$_"
+    my $dir = File::Spec->rel2abs($opts{inputs_folder});
+    $opts{$_} ||= "$dir/$opts{dataset}.$_"
         foreach (qw(csv cef mgf));
   }
     
@@ -153,18 +155,6 @@ PARMS
   $sth->execute($opts{consensus_id}, $new_match_run_id)
       or die "Couldn't execute statement: " . $sth->errstr;
 
-  #-------------------------------------------------------------------
-  #  Each time more MS/MS data is added, an exclusion list is created.
-  #  The parameters guiding this are set up when creating the consensus,
-  #  in order to be consistent.  It is done here to make sure it's only
-  #  done once, whereas generating the report file of the exclusions that
-  #  can be input to the MS instrument is done with 'exclusions_report.pl',
-  #  which can be run repeatedly without side effects.
-  #-------------------------------------------------------------------
-  $sth = $dbh->prepare('SELECT generate_exclusion_list(?)');
-  $sth->execute($opts{consensus_id})
-      or die "Couldn't execute statement: " . $sth->errstr;
-  my ($iter) = $sth->fetchrow_array();
   $sth->finish();
 
   ms_db::close_db($dbh);
