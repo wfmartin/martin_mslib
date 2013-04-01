@@ -5,9 +5,9 @@
 use strict;
 use DBI;
 use DBD::Pg;
+use Getopt::Long;
 
 use ms_db;
-use opts_w_file;
 use cons_matching_proteins;
 
 my $dbh;
@@ -47,6 +47,7 @@ my @opts_specs = (
 #-----------------------------------------------------
 #  For consensus_parameters table:
 #-----------------------------------------------------
+  'consensus_parameters_key=s',
 
   #-------------------------------------------------------------------------
   # Related to FeatureLinkerUnlabeledQT program:
@@ -66,17 +67,18 @@ my @opts_specs = (
   # Quantity threshold for consensus grps output from FeatureLinkerUnlabeledQT.
   'min_quantity=i',
 
-  # Times to attempt fragmenting compound before putting in exclusion list.
-  'max_frag_attempts=i',
+  # Times in preferred list before being excluded.
+  'max_times_preferred=i',
 
-  # Times to attempt identifying fragmented cpd before putting in excl list.
+  # Times to attempt identifying fragmented cpd before being excluded.
   'max_ident_attempts=i',
 
   'max_excl_pref_list_length=i',
+  'max_exclusion_iterations=i',
 
   # Used in generating mass_rt_rectangle values:
   'rect_mass_ppm_width=f',
-  'rect_rt_min_height=f',
+  'rect_rt_min_width=f',
   
   'max_rt_gap=f',
   'min_num_peaks=i',
@@ -109,7 +111,7 @@ sub print_help {
 
 
 { ###  MAIN  ############################################################
-  opts_w_file::GetOpts(\%opts, @ms_db::db_opts, @opts_specs,
+  GetOptions(\%opts, @ms_db::db_opts, @opts_specs,
       'calibrant_ions_file=s', 'preserve_temp_files!', 'help!'
   );
 
@@ -273,9 +275,10 @@ sub print_help {
         qw(consensus_parameters_key lc_config_id
            mass_ppm_error_limit cons_max_rt_diff 
            min_featurelinker_quality 
-           max_frag_attempts max_ident_attempts
+           max_times_preferred max_ident_attempts
            max_excl_pref_list_length
-           rect_mass_ppm_width rect_rt_min_height
+           max_exclusion_iterations
+           rect_mass_ppm_width rect_rt_min_width
           );
 
     push @cons_param_cols, 'min_quantity'  if ($opts{min_quantity});

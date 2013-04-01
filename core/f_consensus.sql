@@ -56,28 +56,40 @@ CREATE OR REPLACE FUNCTION get_compound_mass_rt_rectangle(
     p_rt_end                 real,
     p_rt_adjustment_to_consensus  real,
     p_rect_mass_ppm_width    real,
-    p_rect_rt_min_height     real
+    p_rect_rt_min_width     real
     )
     RETURNS box
     LANGUAGE SQL AS $$
 
   WITH pass_1 AS (
     SELECT
+      -----------------------------------------------------------------------
+      -- How much should the width of the retention time window be expanded?
+      -- If (end-start) + adjustment is less than the minimum rt width, then
+      -- add enough to expand it to the minimum width.
+      -----------------------------------------------------------------------
       CASE
         WHEN (ABS($4) + $3 - $2) < $6  THEN ($6 - ABS($4) + $3 - $2)
         ELSE 0::real
       END  AS rt_expansion,
 
+      -----------------------------------------------------------------------
+      -- If the adjustment is negative, shift rt_start to the left,
+      -- otherwise shift rt_end to the right.
+      -----------------------------------------------------------------------
       CASE WHEN $4 < 0 THEN $2 + $4 ELSE $2 END  AS rt_start,
 
       CASE WHEN $4 > 0 THEN $3 + $4 ELSE $3 END  AS rt_end
     )
   SELECT
+    -----------------------------------------------------------------------
+    --  Add half of the rt expansion to each side of the retention window.
+    -----------------------------------------------------------------------
     box(
-      point($1 * (1 - 1e-6* $5):: double precision,
-            pass_1.rt_start - pass_1.rt_expansion),
-      point($1 * (1 + 1e-6* $5):: double precision,
-            pass_1.rt_end - pass_1.rt_expansion)
+      point(pass_1.rt_start - pass_1.rt_expansion/2::real,
+            $1 * (1 - 1e-6* $5):: double precision),
+      point(pass_1.rt_end + pass_1.rt_expansion/2::real,
+            $1 * (1 + 1e-6* $5):: double precision)
       )
   FROM pass_1;
 $$;
@@ -105,7 +117,7 @@ CREATE OR REPLACE FUNCTION map_msms_dataset(
 
   WITH
     tmp_parms AS (
-      SELECT rect_mass_ppm_width, rect_rt_min_height
+      SELECT rect_mass_ppm_width, rect_rt_min_width
       FROM sample_consensus
       JOIN consensus_parameters USING(consensus_parameters_key)
       WHERE consensus_id = $1
@@ -115,7 +127,7 @@ CREATE OR REPLACE FUNCTION map_msms_dataset(
         id,
         get_compound_mass_rt_rectangle(mass,
                 rt_start, rt_end, rt_adjustment_to_consensus,
-                t.rect_mass_ppm_width, t.rect_rt_min_height)
+                t.rect_mass_ppm_width, t.rect_rt_min_width)
             AS mass_rt_rectangle
       FROM observed_mass o, tmp_parms t
       WHERE o.dataset = (SELECT dataset FROM match_run WHERE match_run_id = $2)
@@ -230,10 +242,11 @@ BEGIN
       t.mass,
       t.rt,
       t.rt_width_at_half_ht,
-      LEAST( (t.mass_rt_rectangle[0])[1], (t.mass_rt_rectangle[1])[1])::real
+      LEAST( (t.mass_rt_rectangle[0])[0], (t.mass_rt_rectangle[1])[0])::real
           AS rt_start,
-      GREATEST((t.mass_rt_rectangle[0])[1], (t.mass_rt_rectangle[1])[1])::real
+      GREATEST((t.mass_rt_rectangle[0])[0], (t.mass_rt_rectangle[1])[0])::real
           AS rt_end,
+
       t.quantity,
       t.rel_quantity,
       t.mass_rt_rectangle
@@ -431,6 +444,11 @@ BEGIN
 
   DROP TABLE tmp_map, tmp_match_2_cons;
 
+  UPDATE sample_consensus
+  SET list_produced = False,
+      list_iteration = list_iteration + 1
+  WHERE consensus_id = p_consensus_id;
+
 END;
 $$;
 
@@ -471,6 +489,8 @@ $$;
 
 
 --------------------------------------------------------------------------
+--
+--------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION msms_guidance_report(
     p_consensus_id           varchar)
     RETURNS TABLE(
@@ -488,7 +508,15 @@ DECLARE
   v_max_excl_pref_list_length integer;
   v_num_calibrants           integer;
   v_num_exclude_peaks        integer;
+  v_list_produced            boolean;
+  v_list_iteration           integer;
+  v_excl_list_len            integer;
+  v_pref_list_len            integer;
 BEGIN
+  SELECT list_iteration INTO v_list_iteration
+  FROM sample_consensus
+  WHERE consensus_id = p_consensus_id;
+
   SELECT * INTO v_cons_parms
   FROM consensus_parameters
   WHERE consensus_parameters_key =
@@ -518,61 +546,91 @@ BEGIN
   WHERE calibrant_ion_list_id = v_lc_conf.calibrant_ion_list_id;
 
   -----------------------------------------------------------------------
-  --  Assemble compounds to be excluded.
+  --  Determine the number of items that would be in the exclusion or
+  --  preferred list.
   -----------------------------------------------------------------------
-  CREATE TEMP TABLE tmp_exclude_masses AS 
-    SELECT
-      mass,
-      (1e6 * width(mass_rt_rectangle)/mass)::real AS delta_mz_ppm,
-      cc.min_z,
-      cc.max_z,
-      cc.rt,
-      (height(mass_rt_rectangle))::real   AS delta_rt
-    FROM consensus_compound cc
-    WHERE consensus_id = p_consensus_id  AND exclude_compound;
-
-  SELECT COALESCE(sum(max_z-min_z+1),0)
-  INTO v_num_exclude_peaks
-  FROM tmp_exclude_masses;
+  SELECT
+    SUM(CASE WHEN exclude_compound THEN max_z-min_z+1 ELSE 0 END)::integer,
+    SUM(CASE WHEN exclude_compound THEN 0             ELSE 1 END)::integer
+  INTO v_excl_list_len, v_pref_list_len
+  FROM consensus_compound
+  WHERE consensus_id = p_consensus_id;
 
   -----------------------------------------------------------------------
   --  If the exclusion list is not too long, use it.
   -----------------------------------------------------------------------
-  IF v_num_exclude_peaks + v_num_calibrants <=
-        v_cons_parms.max_excl_pref_list_length  THEN
+  IF v_list_iteration < v_cons_parms.max_exclusion_iterations  AND
+     v_excl_list_len < v_pref_list_len   THEN
+
     RETURN QUERY
       SELECT
-        ((e.mass/z) + v_lc_conf.charge_carrier_mass)::double precision AS mz,
-        e.delta_mz_ppm,
+        ((cc.mass/z) + v_lc_conf.charge_carrier_mass)::double precision AS mz,
+        (1e6 * height(mass_rt_rectangle)/mass)::real AS delta_mz_ppm,
         z AS charge,
-        e.rt,
-        e.delta_rt,
+        cc.rt,
+        (height(mass_rt_rectangle))::real   AS delta_rt,
         True AS exclude
-      FROM tmp_exclude_masses e, generate_series(1, 9) AS z
-      WHERE z BETWEEN min_z and max_z  AND
-            (e.mass/z) + v_lc_conf.charge_carrier_mass
-              < v_lc_conf.theoretical_max_mz;
+      FROM consensus_compound cc, generate_series(1, 9) AS z
+      WHERE consensus_id = p_consensus_id  AND exclude_compound  AND
+            z BETWEEN min_z and max_z  AND
+            (cc.mass/z) + v_lc_conf.charge_carrier_mass
+              < v_lc_conf.theoretical_max_mz
+      ORDER BY quantity DESC
+      LIMIT (v_max_excl_pref_list_length - v_num_calibrants);
 
   -----------------------------------------------------------------------
   --  Otherwise use a preferred list.
   -----------------------------------------------------------------------
   ELSE
-    RETURN QUERY
+    CREATE TEMP TABLE tmp_pref_list AS 
       SELECT
+        consensus_compound_id,
         ((cc.mass/cc.dominant_z) + v_lc_conf.charge_carrier_mass)
             ::double precision AS mz,
-        (1e6 * width(mass_rt_rectangle)/mass)::real AS delta_mz_ppm,
+        (1e6 * height(mass_rt_rectangle)/mass)::real AS delta_mz_ppm,
         cc.dominant_z  AS charge,
         cc.rt,
-        (height(cc.mass_rt_rectangle))::real   AS delta_rt,
-        False AS exclude
+        (width(cc.mass_rt_rectangle))::real   AS delta_rt
       FROM consensus_compound cc
       WHERE consensus_id = p_consensus_id  AND NOT exclude_compound
-      ORDER BY quantity
+      ORDER BY quantity DESC
       LIMIT (v_max_excl_pref_list_length - v_num_calibrants);
+
+    -----------------------------------------------------------------------
+    --  Increment the num_times_preferred counter for each compound put in
+    --  the preferred list.  However, make sure not to repeat this if the
+    --  same report is generated multiple times.
+    --
+    --  For each compound, mark it as excluded if the limit of the number
+    --  of times preferred is reached.
+    -----------------------------------------------------------------------
+    SELECT list_produced INTO v_list_produced
+    FROM sample_consensus
+    WHERE consensus_id = p_consensus_id;
+
+    IF NOT v_list_produced THEN
+      UPDATE consensus_compound cc
+      SET num_times_preferred = num_times_preferred + 1
+      FROM tmp_pref_list pf
+      WHERE cc.consensus_compound_id = pf.consensus_compound_id;
+
+      UPDATE consensus_compound
+      SET exclude_compound = True
+      WHERE consensus_id = p_consensus_id  AND
+            num_times_preferred + 1 > v_cons_parms.max_times_preferred;
+    END IF;
+
+    RETURN QUERY
+      SELECT t.mz, t.delta_mz_ppm, t.charge, t.rt, t.delta_rt, False AS exclude
+      FROM tmp_pref_list t;
+
+    DROP TABLE tmp_pref_list;
+
   END IF;
 
-  DROP TABLE tmp_exclude_masses;
+  UPDATE sample_consensus
+  SET list_produced = True
+  WHERE consensus_id = p_consensus_id;
 
 END;
 $$;

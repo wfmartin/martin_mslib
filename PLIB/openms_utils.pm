@@ -58,7 +58,7 @@ sub handle_consensusElement {
   my @elem_ids = map { $e_list->[4*$_ + 4][0]{id} } (0..$num_elems-1);
 
   my $elem = {
-    compound_consensus_id  => $elem_node->[0]{id},
+    consensus_compound_id  => $elem_node->[0]{id},
     quality                => $elem_node->[0]{quality},
     mass                   => $centroid->{mz},
     rt                     => $centroid->{rt},

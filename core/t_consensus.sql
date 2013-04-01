@@ -15,17 +15,19 @@ CREATE TABLE consensus_parameters(
   min_featurelinker_num_items integer,
   min_quantity               real,
 
-  -- Times to attempt fragmenting compound before putting in exclusion list
-  max_frag_attempts          integer,
   -- Times to attempt identifying fragmented cpd before putting in excl list
   max_ident_attempts         integer,
 
+  -- Times on the preferred list before excluding.
+  max_times_preferred        integer,
+
   -- Maximum number of items in the exclusion/preferred list.
   max_excl_pref_list_length  integer,
+  max_exclusion_iterations   integer,
   
   -- Minimum width (mass) and height (rt) for mass_rt_rectangle
   rect_mass_ppm_width        real,
-  rect_rt_min_height         real
+  rect_rt_min_width         real
 );
 
 
@@ -71,6 +73,9 @@ CREATE TABLE sample_consensus(
 
   dataset_list               varchar[],
   create_ts                  timestamp  DEFAULT now(),
+
+  list_produced              boolean    DEFAULT False,
+  list_iteration             integer    DEFAULT 0,
 
   lcms_library_id            varchar
 );
@@ -123,30 +128,12 @@ CREATE TABLE consensus_compound (
   -- are no longer updated.
   ----------------------------------------------------------------------
   has_non_decoy_ident        boolean  DEFAULT False,
-  num_frag_attempts          integer  DEFAULT 0,
   num_ident_attempts         integer  DEFAULT 0,
+  num_times_preferred        integer  DEFAULT 0,
   exclude_compound           boolean  DEFAULT False,
 
   corrected_mass             double precision
 );
-
-
--------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION get_cons_cpd_rect(
-    p_mass                   double precision,
-    p_rt_start               real,
-    p_rt_end                 real,
-    p_ppm_margin             double precision)
-    RETURNS box
-    LANGUAGE SQL AS $$
-
-  SELECT box(
-      point($1 * (1::double precision - 1e-6::double precision * $4),
-            $2::double precision),
-      point($1 * (1::double precision + 1e-6::double precision * $4),
-            $3::double precision) );
-
-$$;
 
 
 -------------------------------------------------------------------------
@@ -199,7 +186,6 @@ CREATE OR REPLACE FUNCTION corrected_mass_updater()
 DECLARE
   v_cons_cpd                 consensus_compound;
   v_cpd_mass                 numeric(10,5);
-  v_max_frag_attempts        integer;
   v_max_ident_attempts       integer;
 BEGIN
   SELECT *
@@ -227,9 +213,6 @@ BEGIN
 
   ELSIF NEW.is_fragmented THEN
     v_cons_cpd.num_ident_attempts := v_cons_cpd.num_ident_attempts + 1;
-
-  ELSIF v_cons_cpd.num_ident_attempts = 0  THEN
-    v_cons_cpd.num_frag_attempts := v_cons_cpd.num_frag_attempts + 1;
   END IF;
 
   IF v_cons_cpd.min_z IS NULL OR NEW.min_z < v_cons_cpd.min_z
@@ -243,14 +226,12 @@ BEGIN
   END IF;
 
   IF NOT v_cons_cpd.exclude_compound THEN
-    SELECT max_frag_attempts, max_ident_attempts
-    INTO v_max_frag_attempts, v_max_ident_attempts
+    SELECT max_ident_attempts INTO v_max_ident_attempts
     FROM sample_consensus
     JOIN consensus_parameters USING(consensus_parameters_key)
     WHERE consensus_id = NEW.consensus_id;
 
-    IF v_cons_cpd.num_frag_attempts  >= v_max_frag_attempts OR
-       v_cons_cpd.num_ident_attempts >= v_max_ident_attempts  THEN
+    IF v_cons_cpd.num_ident_attempts >= v_max_ident_attempts  THEN
       v_cons_cpd.exclude_compound := True;
     END IF;
   END IF;
@@ -260,7 +241,6 @@ BEGIN
       max_z                =  v_cons_cpd.max_z,
       corrected_mass       =  v_cons_cpd.corrected_mass,
       has_non_decoy_ident  =  v_cons_cpd.has_non_decoy_ident,
-      num_frag_attempts    =  v_cons_cpd.num_frag_attempts,
       num_ident_attempts   =  v_cons_cpd.num_ident_attempts,
       exclude_compound     =  v_cons_cpd.exclude_compound
   WHERE consensus_compound_id = NEW.consensus_compound_id;

@@ -115,7 +115,7 @@ my $dbh;
       cons_max_rt_diff,
       mass_ppm_error_limit,
       rect_mass_ppm_width,
-      rect_rt_min_height,
+      rect_rt_min_width,
       min_featurelinker_quality,
       min_featurelinker_num_items,
       min_quantity
@@ -332,7 +332,7 @@ INSERT_COMPOUND
   $sth = $dbh->prepare($query);
   $sth->execute($opts{consensus_id},
                 $cons_parms_row->{rect_mass_ppm_width},
-                $cons_parms_row->{rect_rt_min_height})
+                $cons_parms_row->{rect_rt_min_width})
           or die "Couldn't execute statement: " . $sth->errstr;
 
   #---------------------------------------------------------------------
@@ -367,7 +367,7 @@ TMP_ORPHANS
   $sth = $dbh->prepare($query);
   $sth->execute( $opts{consensus_id}, $opts{consensus_id}, 
                 $cons_parms_row->{rect_mass_ppm_width},
-                $cons_parms_row->{rect_rt_min_height})
+                $cons_parms_row->{rect_rt_min_width})
       or die "Couldn't execute statement: " . $sth->errstr;
 
   #-------------------------------------------------------------------
@@ -441,7 +441,7 @@ PROMOTE
     $sth = $dbh->prepare($query);
     $sth->execute($opts{consensus_id},
                   $cons_parms_row->{rect_mass_ppm_width},
-                  $cons_parms_row->{rect_rt_min_height})
+                  $cons_parms_row->{rect_rt_min_width})
         or die "Couldn't execute statement: " . $sth->errstr;
 
     $query = <<DELETE;
@@ -470,6 +470,8 @@ UPDATE_LCMS
   #  reference file later in MapAlignerPoseClustering to align the
   #  retention times of subsequent MS/MS runs with the consensus.
   #-------------------------------------------------------------------
+  $_->{id} = $_->{consensus_compound_id}  foreach (@cons_elems);
+
   my $cons_file = "$opts{consensus_id}.featureXML";
   openms_utils::create_featurexml_file($opts{consensus_id}, $cons_file,
                                        \@cons_elems);
