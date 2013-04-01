@@ -1,9 +1,0 @@
-db_name=mst
-inputs_folder=/home/bmartin/gf/cmg_milk
-consensus_id=mso
-lc_config_id=default
-bio_context_id=human_milk
-proteins_fasta=/home/bmartin/gf/gpm/HumanMilk_6.23.2012_UniprotQueryBased.fasta
-gpm_parameters_key=pep_defaults
-min_score=1.2
-decoy_random!
