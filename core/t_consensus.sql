@@ -27,7 +27,9 @@ CREATE TABLE consensus_parameters(
   
   -- Minimum width (mass) and height (rt) for mass_rt_rectangle
   rect_mass_ppm_width        real,
-  rect_rt_min_width         real
+  rect_rt_min_width          real,
+
+  min_excl_pref_rt_width     real
 );
 
 

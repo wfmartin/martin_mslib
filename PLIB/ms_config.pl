@@ -79,6 +79,9 @@ my @opts_specs = (
   # Used in generating mass_rt_rectangle values:
   'rect_mass_ppm_width=f',
   'rect_rt_min_width=f',
+
+  # Used in generating exclusion/preferred lists:
+  'min_excl_pref_rt_width=f',
   
   'max_rt_gap=f',
   'min_num_peaks=i',
@@ -278,7 +281,7 @@ sub print_help {
            max_times_preferred max_ident_attempts
            max_excl_pref_list_length
            max_exclusion_iterations
-           rect_mass_ppm_width rect_rt_min_width
+           rect_mass_ppm_width rect_rt_min_width min_excl_pref_rt_width
           );
 
     push @cons_param_cols, 'min_quantity'  if ($opts{min_quantity});

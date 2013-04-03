@@ -56,7 +56,7 @@ CREATE OR REPLACE FUNCTION get_compound_mass_rt_rectangle(
     p_rt_end                 real,
     p_rt_adjustment_to_consensus  real,
     p_rect_mass_ppm_width    real,
-    p_rect_rt_min_width     real
+    p_rect_rt_min_width      real
     )
     RETURNS box
     LANGUAGE SQL AS $$
@@ -68,18 +68,17 @@ CREATE OR REPLACE FUNCTION get_compound_mass_rt_rectangle(
       -- If (end-start) + adjustment is less than the minimum rt width, then
       -- add enough to expand it to the minimum width.
       -----------------------------------------------------------------------
-      CASE
-        WHEN (ABS($4) + $3 - $2) < $6  THEN ($6 - ABS($4) + $3 - $2)
-        ELSE 0::real
-      END  AS rt_expansion,
+      GREATEST($6 - ($3 - $2 + ABS(COALESCE($4,0::real))), 0::real)
+          AS rt_expansion,
 
       -----------------------------------------------------------------------
+      -- Use the rt adjustment to widen the window rather than shift it,
+      -- erring in the direction of being more inclusive.
       -- If the adjustment is negative, shift rt_start to the left,
       -- otherwise shift rt_end to the right.
       -----------------------------------------------------------------------
-      CASE WHEN $4 < 0 THEN $2 + $4 ELSE $2 END  AS rt_start,
-
-      CASE WHEN $4 > 0 THEN $3 + $4 ELSE $3 END  AS rt_end
+      $2 + LEAST   ($4, 0::real)  AS rt_start,
+      $3 + GREATEST($4, 0::real)  AS rt_end
     )
   SELECT
     -----------------------------------------------------------------------
@@ -568,7 +567,9 @@ BEGIN
         (1e6 * height(mass_rt_rectangle)/mass)::real AS delta_mz_ppm,
         z AS charge,
         cc.rt,
-        (height(mass_rt_rectangle))::real   AS delta_rt,
+        GREATEST(v_cons_parms.min_excl_pref_rt_width, 
+                 (width(mass_rt_rectangle))::real)
+            AS delta_rt,
         True AS exclude
       FROM consensus_compound cc, generate_series(1, 9) AS z
       WHERE consensus_id = p_consensus_id  AND exclude_compound  AND
@@ -590,7 +591,9 @@ BEGIN
         (1e6 * height(mass_rt_rectangle)/mass)::real AS delta_mz_ppm,
         cc.dominant_z  AS charge,
         cc.rt,
-        (width(cc.mass_rt_rectangle))::real   AS delta_rt
+        GREATEST(v_cons_parms.min_excl_pref_rt_width, 
+                 (width(mass_rt_rectangle))::real)
+            AS delta_rt
       FROM consensus_compound cc
       WHERE consensus_id = p_consensus_id  AND NOT exclude_compound
       ORDER BY quantity DESC
