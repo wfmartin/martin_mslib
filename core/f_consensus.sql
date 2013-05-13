@@ -377,16 +377,28 @@ BEGIN
   INSERT INTO consensus_cpd_map(consensus_compound_id, consensus_id,
           obs_mass_id, min_z, max_z, is_fragmented,
           match_id, is_decoy, compound_w_origin_id, score)
+--    WITH tmp_spectrum AS (
+--      SELECT
+--        o.id AS obs_mass_id,
+--        min(charge) AS min_z,
+--        max(charge) AS max_z,
+--        (max(num_peaks) > 0) AS is_fragmented
+--      FROM component_spectrum cs
+--      JOIN observed_mass o
+--          ON (o.dataset = v_dataset AND o.peak_id = cs.parent_peak_id)
+--      WHERE cs.dataset = v_dataset
+--      GROUP BY o.id
+--      ),
     WITH tmp_spectrum AS (
       SELECT
         o.id AS obs_mass_id,
-        min(charge) AS min_z,
-        max(charge) AS max_z,
-        (max(num_peaks) > 0) AS is_fragmented
-      FROM component_spectrum cs
-      JOIN observed_mass o
-          ON (o.dataset = v_dataset AND o.peak_id = cs.parent_peak_id)
-      WHERE cs.dataset = v_dataset
+        COALESCE(min(charge), min(min_z)) AS min_z,
+        COALESCE(max(charge), max(max_z)) AS max_z,
+        COALESCE((max(num_peaks) > 0), False) AS is_fragmented
+      FROM observed_mass o
+      LEFT OUTER JOIN component_spectrum cs
+          ON (cs.dataset = v_dataset AND o.peak_id = cs.parent_peak_id)
+      WHERE o.dataset = v_dataset
       GROUP BY o.id
       ),
     pass_1 AS (
@@ -434,7 +446,11 @@ BEGIN
       obs_mass_id,
       min_z,
       max_z,
-      is_fragmented,
+      --------------------------------------------------------------------
+      --  Correct the problem of peaks not matched to FCBMF CSV rows,
+      --  but with peptide identifications.
+      --------------------------------------------------------------------
+      is_fragmented OR score IS NOT NULL    AS is_fragmented,
       match_id,
       is_decoy,
       compound_w_origin_id,
@@ -636,4 +652,317 @@ BEGIN
   WHERE consensus_id = p_consensus_id;
 
 END;
+$$;
+
+
+----------------------------------------------------------------------------
+--  RETURN identified compounds subject to a limit of false discovery rate.
+--
+--  Iterate through the compounds in the consensus in order of decreasing score 
+--  returning the putative (non-decoy) compounds until the portion of decoys
+--  exceeds the given maximum for false discovery rate (p_max_fdr).
+--
+--  Do not include the compounds imported from an LCMS library in the
+--  computation.
+----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION consensus_fdr_filter(
+    p_consensus_id           varchar,
+    p_max_fdr                real)
+    RETURNS TABLE (
+      consensus_compound_id    integer,
+      compound_w_origin_id     integer,
+      rt_start                 real,
+      rt_end                   real,
+      min_z                    integer,
+      max_z                    integer,
+      quantity                 real,
+      rel_quantity             real,
+      score                    real
+    )
+    LANGUAGE plpgsql AS $$
+DECLARE
+  v_num_cpds                 integer;
+  v_num_decoy_cpds           integer;
+  v_is_decoy                 boolean;
+  v_fdr                      real;
+  v_lcms_pseudo_score        real;
+BEGIN
+  v_lcms_pseudo_score := 1e30;
+  v_num_cpds := 0;
+  v_num_decoy_cpds := 0;
+
+  FOR consensus_compound_id, compound_w_origin_id, rt_start, rt_end,
+      min_z, max_z, quantity, rel_quantity, score, v_is_decoy
+  IN
+    WITH tmp_map_1 AS (
+      --------------------------------------------------------------------
+      --  Treat compound identities imported from an LCMS library as having
+      --  a p-value of zero (or infinite score), or a VERY large number
+      --  represented for the score.
+      --------------------------------------------------------------------
+      SELECT
+        m.consensus_compound_id,
+        c.min_z,
+        c.max_z,
+        False AS is_decoy,
+        unnest(c.compound_w_origin_ids) AS compound_w_origin_id,
+        v_lcms_pseudo_score  AS score
+      FROM consensus_cpd_lcms_map m
+      JOIN lcms_library_compound c USING(lcms_library_compound_id)
+      WHERE consensus_id = p_consensus_id
+        UNION
+      --------------------------------------------------------------------
+      --  Compounds identified programatically.
+      --------------------------------------------------------------------
+      SELECT
+        m.consensus_compound_id,
+        m.min_z,
+        m.max_z,
+        m.is_decoy,
+        m.compound_w_origin_id,
+        m.score
+      FROM consensus_cpd_map m
+      WHERE consensus_id = p_consensus_id  AND
+            m.compound_w_origin_id IS NOT NULL
+      ),
+    --------------------------------------------------------------------
+    --  Merge above two kinds of compound identities, keeping the best score.
+    --------------------------------------------------------------------
+    tmp_map_2 AS (
+      SELECT
+        t.consensus_compound_id,
+        min(t.min_z) AS min_z,
+        max(t.max_z) AS max_z,
+        t.is_decoy,
+        t.compound_w_origin_id,
+        max(t.score) AS score
+      FROM tmp_map_1 t
+      GROUP BY t.consensus_compound_id, t.is_decoy, t.compound_w_origin_id
+      )
+    SELECT
+      m.consensus_compound_id,
+      m.compound_w_origin_id,
+      cc.rt_start,
+      cc.rt_end,
+      m.min_z,
+      m.max_z,
+      cc.quantity,
+      cc.rel_quantity,
+      m.score,
+      m.is_decoy
+    FROM tmp_map_2 m
+    JOIN consensus_compound cc USING(consensus_compound_id)
+    WHERE consensus_id = p_consensus_id
+    ORDER BY score DESC
+  LOOP
+    IF v_is_decoy THEN
+      v_num_decoy_cpds := v_num_decoy_cpds + 1;
+      EXIT WHEN p_max_fdr IS NOT NULL AND v_num_decoy_cpds >= 2 AND
+        v_num_decoy_cpds::real/(v_num_cpds + v_num_decoy_cpds)::real >
+            p_max_fdr;
+    ELSE
+      --------------------------------------------------------------------
+      --  Exclude matches to the LCMS library from the FDR computation.
+      --------------------------------------------------------------------
+      IF (score < v_lcms_pseudo_score) THEN
+        v_num_cpds := v_num_cpds + 1;
+      END IF;
+
+      RETURN NEXT;
+    END IF;
+
+    CONTINUE WHEN v_num_cpds = 0;
+
+    v_fdr := v_num_decoy_cpds::real/(v_num_cpds + v_num_decoy_cpds)::real;
+    EXIT WHEN p_max_fdr IS NOT NULL AND v_num_decoy_cpds >= 2 AND
+        v_fdr > p_max_fdr;
+
+  END LOOP;
+
+END;
+$$;
+
+
+-------------------------------------------------------------------------
+--  Merge the consensus_compound row for p_id_2 into the one for p_id_1.
+-------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION consensus_cpd_pair_merge(
+    p_receiver_cons_cpd_id   integer,
+    p_donor_cons_cpd_id      integer)
+    RETURNS void
+    LANGUAGE SQL AS $$
+
+  UPDATE consensus_compound cc1
+  SET
+    rt = (cc1.rt + cc2.rt)/2::real,
+    rt_start = LEAST(cc1.rt_start, cc2.rt_start),
+    rt_end   = GREATEST(cc1.rt_end, cc2.rt_end),
+    quantity = GREATEST(cc1.quantity, cc2.quantity),
+    rel_quantity = GREATEST(cc1.rel_quantity, cc2.rel_quantity),
+    mass_rt_rectangle = encompassing_box(
+        ARRAY[cc1.mass_rt_rectangle, cc2.mass_rt_rectangle] ),
+    obs_mass_list = cc1.obs_mass_list || cc2.obs_mass_list,
+    dataset_list = array_unique_vals(cc1.dataset_list || cc2.dataset_list),
+    msms_only = cc1.msms_only AND cc2.msms_only,
+    min_z = LEAST(cc1.min_z, cc2.min_z),
+    max_z = GREATEST(cc1.max_z, cc2.max_z),
+    has_non_decoy_ident = cc1.has_non_decoy_ident OR cc2.has_non_decoy_ident,
+    num_ident_attempts = LEAST(cc1.num_ident_attempts, cc2.num_ident_attempts),
+    num_times_preferred =
+        GREATEST(cc1.num_times_preferred, cc2.num_times_preferred),
+    exclude_compound = cc1.exclude_compound OR cc2.exclude_compound
+  FROM consensus_compound cc2
+  WHERE cc1.consensus_compound_id = $1  AND
+        cc1.consensus_compound_id = $2;
+
+  DELETE FROM consensus_compound
+  WHERE consensus_compound_id = $2;
+        
+  UPDATE consensus_cpd_map
+  SET consensus_compound_id = $1
+  WHERE consensus_compound_id = $2;
+
+  UPDATE consensus_removed_match
+  SET consensus_compound_id = $1
+  WHERE consensus_compound_id = $2;
+
+  UPDATE obs_mass_promoted
+  SET consensus_compound_id = $1
+  WHERE consensus_compound_id = $2;
+
+  UPDATE consensus_cpd_lcms_map
+  SET consensus_compound_id = $1
+  WHERE consensus_compound_id = $2;
+
+$$;
+
+
+-------------------------------------------------------------------------
+--  See if 2 ranges overlap, but first making sure the ranges have a width
+--  of at least p_min_rt_width.
+-------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION ranges_overlap_with_min_width(
+    p_min_rt_width           real,
+    p_rt_start_1             real,
+    p_rt_end_1               real,
+    p_rt_start_2             real,
+    p_rt_end_2               real)
+    RETURNS boolean
+    LANGUAGE SQL AS $$
+
+  SELECT ranges_overlap(
+    LEAST   ($2, ($2 + $3 - $1)/2::real),
+    GREATEST($3, ($2 + $3 + $1)/2::real),
+    LEAST   ($4, ($4 + $5 - $1)/2::real),
+    GREATEST($5, ($4 + $5 + $1)/2::real)
+    );
+$$;
+
+
+-------------------------------------------------------------------------
+--  After compounds have been identified, take advantage of that information
+--  to identify and merge consensus_compound rows that have common identified
+--  compounds and whose retention times overlap.
+-------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION consensus_merge_overlapping(
+    p_consensus_id           varchar,
+    p_min_rt_width           real)
+    RETURNS integer
+    LANGUAGE plpgsql AS $$
+DECLARE
+  v_cnt                      integer;
+  v_receiver_id              integer;
+  v_donor_id                 integer;
+BEGIN
+
+  INSERT INTO consensus_cpd_merge_pair(consensus_id,
+      receiver_cons_cpd_id, donor_cons_cpd_id)
+    WITH tmp_map AS (
+      SELECT DISTINCT consensus_compound_id, compound_w_origin_id
+      FROM consensus_cpd_map
+      WHERE consensus_id = p_consensus_id AND match_id IS NOT NULL
+      ),
+    tmp_map2 AS (
+      SELECT 
+        compound_w_origin_id, 
+        m1.consensus_compound_id AS receiver_id,
+        m2.consensus_compound_id AS donor_id
+      FROM tmp_map m1
+      JOIN tmp_map m2 USING(compound_w_origin_id)
+      WHERE m1.consensus_compound_id < m2.consensus_compound_id
+      )
+    SELECT p_consensus_id, receiver_id, donor_id
+    FROM tmp_map2
+    JOIN consensus_compound cc1 ON (cc1.consensus_compound_id = receiver_id)
+    JOIN consensus_compound cc2 ON (cc2.consensus_compound_id = donor_id)
+    WHERE ranges_overlap_with_min_width(p_min_rt_width,
+              cc1.rt_start, cc1.rt_end, cc2.rt_start, cc2.rt_end);
+
+  GET DIAGNOSTICS v_cnt := ROW_COUNT;
+  
+  FOR v_receiver_id, v_donor_id  IN
+      SELECT receiver_cons_cpd_id, donor_cons_cpd_id
+      FROM consensus_cpd_merge_pair
+      WHERE consensus_id = p_consensus_id
+      ORDER BY donor_cons_cpd_id DESC
+  LOOP
+    PERFORM consensus_cpd_pair_merge(v_receiver_id, v_donor_id);
+  END LOOP;
+
+  RETURN v_cnt;
+END;
+$$;
+
+
+-------------------------------------------------------------------------
+--  Map compounds with modifications to their equivalents without the 
+--  modifications.
+-------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION consensus_map_mods(
+    p_consensus_id           varchar)
+    RETURNS void
+    LANGUAGE SQL AS $$
+
+  INSERT INTO cons_cpd_mods_map(
+      consensus_id,
+      base_cons_cpd_id,
+      mods_cons_cpd_id,
+      base_cpd_w_origin_id,
+      mods_cpd_w_origin_id,
+      protein_name,
+      start_pos_on_protein,
+      seq_len,
+      aa_seq,
+      ng_mods_str)
+
+    WITH pass_1 AS (
+      SELECT DISTINCT
+        consensus_compound_id,
+        compound_w_origin_id,
+        protein_name,
+        start_pos_on_protein,
+        aa_seq,
+        seq_len,
+        ng_mods_str
+      FROM consensus_cpd_map m
+      JOIN compound_w_origin USING(compound_w_origin_id)
+      JOIN compound USING(compound_id)
+      JOIN peptide USING(peptide_id)
+      WHERE m.consensus_id = $1
+      )
+    SELECT
+      $1,
+      p1.consensus_compound_id AS base_cons_cpd_id,
+      p2.consensus_compound_id AS mods_cons_cpd_id,
+      p1.compound_w_origin_id  AS base_cpd_w_origin_id,
+      p2.compound_w_origin_id  AS mods_cpd_w_origin_id,
+      p1.protein_name,
+      p1.start_pos_on_protein,
+      p1.seq_len,
+      p1.aa_seq,
+      p2.ng_mods_str
+    FROM pass_1 p1  JOIN  pass_1 p2
+        USING(protein_name, start_pos_on_protein, seq_len)
+    WHERE COALESCE(p1.ng_mods_str,'') = ''  AND
+          COALESCE(p2.ng_mods_str,'') <> '';
 $$;

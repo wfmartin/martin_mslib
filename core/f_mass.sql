@@ -249,30 +249,3 @@ BEGIN
 
 END;
 $$;
-
-
---------------------------------------------------------------------------
---  When there's a significant mass error in a match, that probably means
---  that the mass from the matching program is probably correct rather than
---  the mass determined by "Find Compounds by Molecular Feature".
---
---  This program will modify the mass values 
---------------------------------------------------------------------------
--- CREATE OR REPLACE FUNCTION obs_mass_correct_from_matches(
---     p_match_run_id           integer)
---     RETURNS void
---     LANGUAGE plpgsql AS $$
--- DECLARE
--- BEGIN
--- 
---   WITH pass_1 AS (
---     SELECT *
---       
---     FROM match m
---     WHERE m.id = p_match_run_id
---     GROUP BY m.obs_mass_id
---     HAVING bool_or( abs(error_ppm) > 30 )
--- 
--- END;
--- $$;
--- 

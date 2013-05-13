@@ -6,6 +6,7 @@ use strict;
 use DBI;
 use DBD::Pg;
 use Getopt::Long;
+use File::Basename;
 
 use ms_db;
 use cons_matching_proteins;
@@ -114,6 +115,22 @@ sub print_help {
 
 
 { ###  MAIN  ############################################################
+  my ($progname) = fileparse($0);
+  my $usage = <<USAGE;
+
+Usage: $progname
+    --db_name       <database name>
+  [ --db_user       <database user name> ]
+    (plus NUMEROUS parameters)
+
+  The $progname program is used to save many configuration parameters for
+  later reference when creating a compounds consensus.
+
+  See source code for documentation of the many parameters.
+
+USAGE
+  die $usage unless (scalar(@ARGV) > 0);
+
   GetOptions(\%opts, @ms_db::db_opts, @opts_specs,
       'calibrant_ions_file=s', 'preserve_temp_files!', 'help!'
   );

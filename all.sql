@@ -4,6 +4,8 @@ CREATE LANGUAGE plperlu;
 
 \i core/t_utils.sql
 \i core/f_utils.sql
+\i core/f_geom.sql
+\i core/f_aa.sql
 \i core/t_compound.sql
 \i core/f_compound.sql
 \i core/t_mass_data.sql
@@ -15,7 +17,6 @@ CREATE LANGUAGE plperlu;
 \i core/f_consensus.sql
 
 \i core/f_mass.sql
-\i core/f_geom.sql
 
 \i agilent/t_molf.sql
 \i agilent/f_molf.sql

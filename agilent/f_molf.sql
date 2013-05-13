@@ -244,7 +244,7 @@ $$;
 
 
 -----------------------------------------------------------------------
---  Input temp tables:  tmp_cef, tmp_molf_rec, tmp_mgf
+--  Input temp tables:  tmp_molf_rec, tmp_mgf
 -----------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION combine_molf_data(
     p_charge_carrier_mass    double precision)
@@ -253,6 +253,7 @@ CREATE OR REPLACE FUNCTION combine_molf_data(
       spectrum_id            integer,
       csv_mass               double precision,
       component_charge       integer,
+      component_rt           real,
       component_recipe       varchar,
       component_volume       real,
       min_z                  integer,
@@ -283,6 +284,7 @@ BEGIN
           AS csv_mass,
       COALESCE(m.component_charge, tmp_mgf.charge) 
           AS component_charge,
+      m.component_rt,
       m.component_recipe,
       m.component_volume,
       m.min_z,
@@ -313,6 +315,7 @@ BEGIN
     nextval('molf_spectrum_seq')::integer AS spectrum_id,
     p.csv_mass,
     p.component_charge,
+    p.component_rt,
     p.component_recipe,
     p.component_volume,
     p.min_z,
@@ -386,6 +389,7 @@ BEGIN
       cpd,
       csv_mass,
       component_charge,
+      component_rt,
       component_recipe,
       component_volume,
       component_mz,
@@ -462,6 +466,7 @@ BEGIN
         cpd,
         csv_mass,
         component_charge,
+        component_rt,
         component_recipe,
         component_volume,
         min_z,
@@ -489,6 +494,7 @@ BEGIN
             AS cpd,
         csv_mass,
         component_charge,
+        component_rt,
         component_recipe,
         component_volume,
         min_z,
@@ -634,7 +640,7 @@ BEGIN
       sum(volume)::real/v_max_volume   AS rel_quantity,
       min(min_z)                       AS min_z,
       max(max_z)                       AS max_z,
-      (array_agg(component_charge ORDER BY component_volume DESC))[1]
+      (array_agg(component_charge ORDER BY component_volume DESC NULLS LAST))[1]
           AS dominant_z
     FROM molf_spectrum
     WHERE dataset = p_dataset

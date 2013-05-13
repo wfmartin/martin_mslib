@@ -51,6 +51,7 @@ CREATE TABLE molf_spectrum(
   cpd                        integer,
   csv_mass                   double precision,
   component_charge           integer,   -- from CEF
+  component_rt               real,      -- from CEF
   component_recipe           varchar,   -- from CEF
   component_volume           real,      -- from CEF
   min_z                      integer,   -- from CSV 

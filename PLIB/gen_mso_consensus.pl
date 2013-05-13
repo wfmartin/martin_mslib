@@ -18,10 +18,13 @@ use DBD::Pg;
 use Getopt::Long;
 use POSIX;
 use File::Spec;
+use File::Basename;
 
 use ms_db;
 use opts_w_file;
 use openms_utils;
+
+my $dbh;
 
 #------------------------------------------------------------------
 sub load_data {
@@ -85,9 +88,33 @@ LCMS_READ
 }
 
 
-my $dbh;
-
 { ###  MAIN  ###
+  my ($progname) = fileparse($0);
+  my $usage = <<USAGE;
+
+Usage: $progname
+    --db_name       <database name>
+  [ --db_user       <database user name> ]
+    --consensus_id  <consensus_id>
+    --consensus_parameters_key  <key to 'consensus_parameters' table>
+    --cons_matching_params_key  <key to 'cons_matching_params' table>
+    --inputs_folder             <folder containing input data>
+    --bio_context_id            <key to 'bio_context' table>
+  [ --lcms_library_id           <key to lcms_library_id> }
+  [ --preserve_temp_files ]
+
+Where
+  The lcms_library_id parameter indicates that the consensus is to be
+  initialized with a library produced from a previous consensus.
+
+  The $progname program generates a consensus from at least 3 LCMS
+  (not tandem) runs of the same sample, processed through the
+  "Find compounds by molecular feature" of Agilent's Mass Hunter software.
+
+USAGE
+  die $usage unless (scalar(@ARGV) > 0);
+
+
   my %opts;
   opts_w_file::GetOpts(\%opts, @ms_db::db_opts,
       'consensus_id=s', 'consensus_parameters_key=s',

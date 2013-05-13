@@ -139,6 +139,31 @@ CREATE TABLE consensus_compound (
 
 
 -------------------------------------------------------------------------
+CREATE TABLE consensus_cpd_merge_pair(
+  consensus_id               varchar,
+  receiver_cons_cpd_id       integer,
+  donor_cons_cpd_id          integer
+);
+
+CREATE INDEX cc_merge_pair_ind ON consensus_cpd_merge_pair(consensus_id);
+
+
+-------------------------------------------------------------------------
+CREATE TABLE cons_cpd_mods_map(
+  consensus_id               varchar,
+  base_cons_cpd_id           integer,
+  mods_cons_cpd_id           integer,
+  base_cpd_w_origin_id       integer,
+  mods_cpd_w_origin_id       integer,
+  protein_name               varchar,
+  start_pos_on_protein       integer,
+  seq_len                    integer,
+  aa_seq                     varchar,
+  ng_mods_str                varchar
+);
+ 
+
+-------------------------------------------------------------------------
 CREATE TABLE consensus_cpd_lcms_map(
   consensus_compound_id      integer,
   consensus_id               varchar,
@@ -175,6 +200,7 @@ CREATE TABLE consensus_removed_match(
   consensus_id               varchar,
   match_id                   integer
 );
+
 
 -------------------------------------------------------------------------
 --  When identified compounds associated with the consensus_compound are
@@ -294,3 +320,4 @@ CREATE TABLE obs_mass_promoted(
   match_run_id               integer,   -- run causing promotion
   consensus_compound_id      integer
 );
+
