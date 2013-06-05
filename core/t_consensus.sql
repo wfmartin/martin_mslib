@@ -149,6 +149,37 @@ CREATE INDEX cc_merge_pair_ind ON consensus_cpd_merge_pair(consensus_id);
 
 
 -------------------------------------------------------------------------
+--  The output from FDR filtering.
+-------------------------------------------------------------------------
+CREATE TABLE final_consensus_compound (
+  f_cons_cpd_id              SERIAL PRIMARY KEY,
+  consensus_id               varchar,
+  consensus_compound_id      integer,
+  compound_w_origin_id       integer,
+  rt_start                   real,
+  rt_end                     real,
+  min_z                      integer,
+  max_z                      integer,
+  quantity                   real,
+  rel_quantity               real,
+  score                      real
+);
+
+
+-------------------------------------------------------------------------
+CREATE TABLE final_cons_cpd_cluster (
+  cluster_id                 integer PRIMARY KEY,
+  consensus_id               varchar,
+  protein_name               varchar,
+  start_pos                  integer,
+  end_pos                    integer,
+  seq_len                    integer,
+
+  cpd_ids                    integer[]
+);
+
+
+-------------------------------------------------------------------------
 CREATE TABLE cons_cpd_mods_map(
   consensus_id               varchar,
   base_cons_cpd_id           integer,

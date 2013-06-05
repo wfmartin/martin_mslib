@@ -784,6 +784,81 @@ $$;
 
 
 -------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION finalize_consensus_cpds(
+    p_consensus_id           varchar,
+    p_max_fdr                real)
+    RETURNS void 
+    LANGUAGE SQL AS $$
+
+  INSERT INTO final_consensus_compound(consensus_id,
+      consensus_compound_id, compound_w_origin_id,
+      rt_start, rt_end, min_z, max_z,
+      quantity, rel_quantity, score)
+
+    SELECT $1,
+      consensus_compound_id, compound_w_origin_id,
+      rt_start, rt_end, min_z, max_z, quantity, rel_quantity, score
+    FROM consensus_fdr_filter($1, $2);
+
+$$;
+
+
+-------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION cluster_final_cons_cpds(
+    p_consensus_id           varchar)
+    RETURNS void
+    LANGUAGE plpgsql AS $$
+BEGIN
+  CREATE TEMP TABLE cpd_w_index AS
+    SELECT
+      f_cons_cpd_id,
+      consensus_compound_id,
+      compound_w_origin_id,
+      protein_name,
+      start_pos_on_protein,
+      seq_len
+    FROM final_consensus_compound f
+    JOIN compound_w_origin  c  USING(compound_w_origin_id)
+    JOIN compound           cp USING(compound_id)
+    JOIN peptide            p  USING(peptide_id)
+    WHERE consensus_id = p_consensus_id;
+  
+  CREATE TEMP TABLE tmp_pair AS
+    SELECT
+      t1.f_cons_cpd_id AS id_1,
+      t2.f_cons_cpd_id AS id_2
+    FROM cpd_w_index t1, cpd_w_index t2
+    WHERE t1.f_cons_cpd_id < t2.f_cons_cpd_id  AND
+          t1.protein_name = t2.protein_name    AND
+          ranges_overlap(
+            t1.start_pos_on_protein, t1.start_pos_on_protein + t1.seq_len,
+            t2.start_pos_on_protein, t2.start_pos_on_protein + t2.seq_len);
+  
+  CREATE TEMP TABLE tmp_all_ids AS
+    SELECT f_cons_cpd_id AS id FROM cpd_w_index;
+  
+  INSERT INTO final_cons_cpd_cluster(cluster_id, consensus_id, protein_name,
+      start_pos, end_pos, seq_len, cpd_ids)
+    --  cluster_id, id
+    WITH pass_1 AS ( SELECT * FROM cluster_ids() )
+    SELECT
+      cluster_id,
+      p_consensus_id,
+      (array_agg(protein_name))[1] AS protein_name,
+      MIN(start_pos_on_protein) AS start_pos,
+      MAX(seq_len) + MIN(start_pos_on_protein) + 1  AS end_pos,
+      MAX(seq_len)              AS seq_len,
+      array_agg(id)             AS cpd_ids
+    FROM pass_1
+    JOIN cpd_w_index ON (id = f_cons_cpd_id)
+    GROUP BY cluster_id;
+
+  DROP TABLE cpd_w_index, tmp_pair, tmp_all_ids;
+END;
+$$;
+
+
+-------------------------------------------------------------------------
 --  Merge the consensus_compound row for p_id_2 into the one for p_id_1.
 -------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION consensus_cpd_pair_merge(
@@ -838,8 +913,8 @@ $$;
 
 
 -------------------------------------------------------------------------
---  See if 2 ranges overlap, but first making sure the ranges have a width
---  of at least p_min_rt_width.
+--  See if 2 ranges overlap, but first widening any ranges whose width is
+--  less than p_min_rt_width.
 -------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION ranges_overlap_with_min_width(
     p_min_rt_width           real,
