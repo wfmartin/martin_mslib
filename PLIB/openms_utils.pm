@@ -157,7 +157,7 @@ sub output_peptide_hit {
 sub create_featurexml_file {
   my ($featuremap_name, $outfile_name, $a_rows) = @_;
 
-  my $outf = IO::File->new(">$outfile_name");
+  my $outf = new IO::File(">$outfile_name");
   my $w = XML::Writer->new(OUTPUT=>$outf, DATA_INDENT=>2);
 
   print $outf '<?xml version="1.0" encoding="ISO-8859-1"?>', "\n";
