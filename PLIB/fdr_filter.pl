@@ -1,14 +1,11 @@
 #!/usr/bin/perl
 #----------------------------------------------------------------------------
-#  For a given sample consensus, merge consensus_compound values with 
-#
+# 
 #----------------------------------------------------------------------------
 use strict;
 use DBI;
 use DBD::Pg;
 use Getopt::Long;
-use POSIX;
-use File::Basename;
 
 use ms_db;
 
@@ -22,12 +19,13 @@ Usage: $progname
     --db_name       <database name>
   [ --db_user       <database user name> ]
     --consensus_id  <consensus_id>
-    --min_rt_width  <minimum retention time width>
+    --max_fdr       <false discovery rate limit>
 
-  The $progname program merges consensus compounds that have the same
-  compound identification with overlapping retention times.
-  Consensus compounds whose retention time width is less than 'min_rt_width'
-  are widened for the purpose of testing for overlaps.
+  The $progname program sorts the consensus compound identifications in order
+  of descending p-values.  The list is traversed, counting real compound
+  identifications and decoy compound identifications until the proportion of
+  decoy hits encountered exceeds the allowable false discovery rate.
+  Real hits are put into the table 'final_consensus_compound'.
 
 USAGE
   die $usage unless (scalar(@ARGV) > 0);
@@ -39,10 +37,7 @@ USAGE
 
   $dbh = ms_db::open_db(%opts);
 
-  my $sth = $dbh->prepare('SELECT consensus_merge_overlapping(?,?)');
-  $sth->execute($opts{consensus_id}, $opts{min_rt_width})
+  my $sth = $dbh->prepare('SELECT finalize_consensus_cpds(?,?)');
+  $sth->execute($opts{consensus_id}, $opts{max_fdr})
       or die "Couldn't execute statement: " . $sth->errstr;
-  my ($num_merged) = $sth->fetchrow_array();
-
-  print "Consensus $opts{consensus_id}: merged $num_merged items\n";
 }

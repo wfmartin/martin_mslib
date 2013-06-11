@@ -43,10 +43,23 @@ sub create_gpm_input_file {
 
 
 #-------------------------------------------------------------------------
+sub find_tandem_exe {
+  my $loc = `which tandem.exe`;
+  return 'tandem.exe'  if $loc;
+
+  $loc = `which tandem`;
+  return 'tandem'  if $loc;
+
+  die "Can't find tandem.exe tandem\n";
+}
+
+
+#-------------------------------------------------------------------------
 #  Run GPM (global peptide machine) and return the name of the output file.
 #-------------------------------------------------------------------------
 sub run_gpm {
-  my $cmd = "tandem.exe input.xml > gpm_stdout";
+  my $ex_file = find_tandem_exe();
+  my $cmd = "$ex_file input.xml > gpm_stdout";
   system($cmd)==0  or  die "Error: $cmd\n";
 
   my $dir = cwd();
