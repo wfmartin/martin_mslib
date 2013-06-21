@@ -1,5 +1,5 @@
 --#########################################################################
--- Copyright (C) 2012 William F. Martin
+-- Copyright (C) 2013 William F. Martin
 --
 -- This program is free software; you can redistribute it and/or modify it
 -- under the terms of the GNU General Public License as published by the
@@ -14,7 +14,6 @@
 -- with this program; if not, write to the Free Software Foundation, Inc.,
 -- 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 --#########################################################################
-
 
 ----------------------------------------------------------------------------
 --  CREATE a temp table  tmp_cpd  with compounds, keeping FDR under limit.
